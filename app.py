@@ -25,19 +25,47 @@ MODELS = [
 
 # ===== 新增：拎圖功能 (Fix 你而家睇唔到圖) =====
 def get_image_base64(data):
+    msg = data.get("message", {})
+    im = msg.get("imageMessage", {})
+    # 方法1: Evolution 官方 endpoint
     try:
         url = f"{EVOLUTION_API_URL}/chat/getBase64FromMediaMessage/{EVOLUTION_INSTANCE}"
         headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
-        r = requests.post(url, json={"message": data.get("message")}, headers=headers, timeout=30)
-        print(f"GetBase64 status {r.status_code}")
+        r = requests.post(url, json={"message": msg}, headers=headers, timeout=30)
+        print(f"Method1 GetBase64 status {r.status_code} {r.text[:300]}")
         if r.status_code == 200:
             j = r.json()
             b64 = j.get("base64") or j.get("data") or j.get("base64String")
-            if b64 and "," in b64:  # 如果有 data:image/jpeg;base64, 前綴要切走
-                b64 = b64.split(",")[-1]
-            return b64
+            if b64:
+                if "," in b64: b64 = b64.split(",")[-1]
+                if len(b64) > 100: return b64
     except Exception as e:
-        print(f"GetBase64 fail: {e}")
+        print(f"Method1 fail {e}")
+
+    # 方法2: 直接 download 條 url (最穩)
+    try:
+        image_url = im.get("url") or im.get("mediaUrl") or data.get("message", {}).get("base64") # 有啲 server 直接有
+        # 有啲 Evolution 會俾 mediaUrl 要再加 apikey
+        if image_url and image_url.startswith("http"):
+            print(f"Method2 downloading {image_url[:100]}")
+            r = requests.get(image_url, timeout=30)
+            if r.status_code == 200 and len(r.content) > 1000:
+                import base64
+                return base64.b64encode(r.content).decode()
+    except Exception as e:
+        print(f"Method2 fail {e}")
+
+    # 方法3: 你之前個 key 有時 data 入面有
+    try:
+        maybe = data.get("message", {}).get("message", {}).get("imageMessage", {}).get("url")
+        if maybe:
+            import base64
+            r = requests.get(maybe, timeout=30)
+            if r.status_code == 200:
+                return base64.b64encode(r.content).decode()
+    except:
+        pass
+
     return None
 
 def call_gemini(question, image_b64=None):
