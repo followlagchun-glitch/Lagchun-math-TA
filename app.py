@@ -25,49 +25,49 @@ MODELS = [
 
 # ===== 新增：拎圖功能 (Fix 你而家睇唔到圖) =====
 def get_image_base64(data):
+    import base64
     msg = data.get("message", {})
-    im = msg.get("imageMessage", {})
-    # 方法1: Evolution 官方 endpoint
+    im = msg.get("imageMessage", {}) or {}
+    
+    # Debug: 睇吓 webhook 入面到底有咩
+    print(f"DEBUG imageMessage keys: {list(im.keys())}")
+    print(f"DEBUG data keys: {list(data.keys())}")
+    
+    # 方法1: Evolution 新版 endpoint (你嗰個版本多數用呢個)
     try:
-        url = f"{EVOLUTION_API_URL}/chat/getBase64FromMediaMessage/{EVOLUTION_INSTANCE}"
-        headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
-        r = requests.post(url, json={"message": msg}, headers=headers, timeout=30)
-        print(f"Method1 GetBase64 status {r.status_code} {r.text[:300]}")
-        if r.status_code == 200:
-            j = r.json()
-            b64 = j.get("base64") or j.get("data") or j.get("base64String")
-            if b64:
-                if "," in b64: b64 = b64.split(",")[-1]
-                if len(b64) > 100: return b64
-    except Exception as e:
-        print(f"Method1 fail {e}")
-
-    # 方法2: 直接 download 條 url (最穩)
-    try:
-        image_url = im.get("url") or im.get("mediaUrl") or data.get("message", {}).get("base64") # 有啲 server 直接有
-        # 有啲 Evolution 會俾 mediaUrl 要再加 apikey
-        if image_url and image_url.startswith("http"):
-            print(f"Method2 downloading {image_url[:100]}")
-            r = requests.get(image_url, timeout=30)
-            if r.status_code == 200 and len(r.content) > 1000:
-                import base64
-                return base64.b64encode(r.content).decode()
-    except Exception as e:
-        print(f"Method2 fail {e}")
-
-    # 方法3: 你之前個 key 有時 data 入面有
-    try:
-        maybe = data.get("message", {}).get("message", {}).get("imageMessage", {}).get("url")
-        if maybe:
-            import base64
-            r = requests.get(maybe, timeout=30)
+        # 有啲版本要用 /chat/getBase64FromMediaMessage
+        # 有啲要用 /message/getBase64FromMediaMessage
+        for endpoint in ["/chat/getBase64FromMediaMessage", "/message/getBase64FromMediaMessage"]:
+            url = f"{EVOLUTION_API_URL}{endpoint}/{EVOLUTION_INSTANCE}"
+            headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
+            # payload 要成個 data
+            r = requests.post(url, json=data, headers=headers, timeout=30)
+            print(f"TRY {endpoint} -> {r.status_code} {r.text[:500]}")
             if r.status_code == 200:
-                return base64.b64encode(r.content).decode()
-    except:
-        pass
+                j = r.json()
+                b64 = j.get("base64") or j.get("data") or j.get("base64String") or j.get("result", {}).get("base64")
+                if b64 and len(b64) > 1000:
+                    if "," in b64: b64 = b64.split(",")[-1]
+                    print(f"SUCCESS Method1 len={len(b64)}")
+                    return b64
+    except Exception as e:
+        print(f"Method1 error {e}")
 
+    # 方法2: 直接用 WhatsApp CDN url download (最原始但最work)
+    try:
+        media_url = im.get("url") or im.get("mediaUrl")
+        if media_url:
+            print(f"Method2 downloading {media_url[:150]}")
+            r = requests.get(media_url, timeout=30)
+            if r.status_code == 200 and len(r.content) > 1000:
+                b64 = base64.b64encode(r.content).decode()
+                print(f"SUCCESS Method2 len={len(b64)}")
+                return b64
+    except Exception as e:
+        print(f"Method2 error {e}")
+
+    print("ALL Methods FAILED - no b64")
     return None
-
 def call_gemini(question, image_b64=None):
     if len(GEMINI_API_KEY) < 20:
         return f"❌ KEY empty len={len(GEMINI_API_KEY)}", "no_key", "empty"
