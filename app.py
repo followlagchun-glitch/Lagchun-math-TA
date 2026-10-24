@@ -17,7 +17,15 @@ Use Step 1, Step 2, Step 3 format, short and clear.
 If graph needed, end with: GRAPH_EQUATION: <equation>
 """
 
-MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"]
+# NEW models Oct 2026 — 3.1 Pro + 3.8 Flash — these work with AQ keys
+MODELS = [
+    "gemini-3.1-pro-preview",      # <-- Google told you to use this in screenshot
+    "gemini-3.1-pro",
+    "gemini-3.8-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-2.5-flash-lite"        # fallback
+]
 
 def call_gemini(question, image_b64=None):
     if len(GEMINI_API_KEY) < 20:
