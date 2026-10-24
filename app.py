@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-import os, requests, re, urllib.parse, base64
+import os, requests, re, urllib.parse, base64, time
 
 app = Flask(__name__)
 
@@ -11,82 +11,82 @@ EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
 print(f"BOOT AQ len={len(GEMINI_API_KEY)}")
 
 SYSTEM_PROMPT = """
-You are LC Sir - Hong Kong DSE Math Tutor.
-Step 0 - OCR line by line what student wrote.
+You are LC Sir - HK DSE Math Tutor.
+Step 0 - OCR what student wrote line by line.
 Step 1 - 判斷題目
 Step 2 - 👍 做得好: 2-3 points
 Step 3 - 👎 做得唔好: explain in HK Cantonese
 Step 4 - 正確解法 Step with LaTeX
 Step 5 - 建議 1 tip
-Language: HK Cantonese. If graph needed: GRAPH_EQUATION: <eq>
+Language: HK Cantonese. If graph: GRAPH_EQUATION: <eq>
 """
 
-MODELS = [
-    "gemini-3.8-flash",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-3.5-flash"
-]
+MODELS = ["gemini-3.8-flash","gemini-3.5-flash-lite","gemini-3.5-flash"]
 
 def clean_b64(b64):
     if not b64: return None
     b64 = b64.strip()
-    if "," in b64: b64 = b64.split(",")[-1]  # 去掉 data:image/...
+    if "," in b64: b64 = b64.split(",")[-1]
     b64 = b64.replace("\n","").replace("\r","").replace(" ","")
-    # 加返 padding
     b64 += "=" * (-len(b64) % 4)
     return b64
 
 def get_file_base64(data, is_pdf=False):
     print(f"=== START get_file is_pdf={is_pdf} ===")
-    try:
-        payload = {"message": data}
-        url = f"{EVOLUTION_API_URL}/chat/getBase64FromMediaMessage/{EVOLUTION_INSTANCE}"
-        headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
-        r = requests.post(url, json=payload, headers=headers, timeout=40)
-        print(f"[M1] {r.status_code} {r.text[:1500]}")
-        if r.status_code == 200:
-            j = r.json()
-            raw = j.get("base64") or j.get("data") or j.get("base64String") or j.get("result", {}).get("base64") or j.get("result", {}).get("base64String")
-            if not raw and isinstance(j.get("result"), str) and len(j.get("result"))>1000:
-                raw = j.get("result")
-            b64 = clean_b64(raw) if raw else None
-            if b64 and len(b64)>1000:
-                try:
-                    decoded = base64.b64decode(b64)
-                    print(f"[M1] SUCCESS decoded={len(decoded)} bytes")
-                    # auto mime
-                    mt = "application/pdf" if is_pdf or decoded[:4]==b'%PDF' else "image/jpeg"
+    # 一開始等 3 秒，等 Evolution 落盤
+    print("Initial wait 3s for Evolution to save media...")
+    time.sleep(3)
+    
+    for attempt in range(5): # 試 5 次
+        print(f"Attempt {attempt+1}/5")
+        try:
+            payload = {"message": data}
+            url = f"{EVOLUTION_API_URL}/chat/getBase64FromMediaMessage/{EVOLUTION_INSTANCE}"
+            headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
+            r = requests.post(url, json=payload, headers=headers, timeout=60)
+            print(f"[M1] {r.status_code} len={len(r.text)} {r.text[:1200]}")
+            if r.status_code == 200:
+                j = r.json()
+                raw = j.get("base64") or j.get("data") or j.get("base64String") or j.get("result",{}).get("base64") or j.get("result",{}).get("base64String")
+                if not raw and isinstance(j.get("result"), str) and len(j.get("result"))>1000:
+                    raw = j.get("result")
+                b64 = clean_b64(raw) if raw else None
+                if b64 and len(b64)>1000:
+                    dec = base64.b64decode(b64)
+                    print(f"[M1] SUCCESS {len(dec)} bytes")
+                    mt = "application/pdf" if is_pdf or dec[:4]==b'%PDF' else "image/jpeg"
                     return b64, mt
-                except Exception as e:
-                    print(f"[M1] b64 decode fail {e}")
-    except Exception as e:
-        print(f"[M1] error {e}")
-    print("ALL FAILED")
+        except Exception as e:
+            print(f"[M1] err {e}")
+        if attempt < 4:
+            wait = 8 # 你要求嘅多 5 秒版：8 秒
+            print(f"Sleep {wait}s waiting Evolution download... (attempt {attempt+1})")
+            time.sleep(wait)
+    print("ALL FAILED after 5 tries")
     return None, None
 
 def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
-    prompt = SYSTEM_PROMPT + f"\n\n學生: {question}"
-    last_error = ""
+    prompt = SYSTEM_PROMPT + f"\n學生: {question}"
+    last = ""
     for model in MODELS:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
         headers = {"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY}
         parts = [{"text": prompt}]
         if file_b64:
-            # ****** 關鍵修正：用 inlineData + mimeType ******
             parts.append({"inlineData": {"mimeType": mime_type, "data": file_b64}})
         body = {"contents": [{"role": "user", "parts": parts}], "generationConfig": {"temperature": 0.2}}
         try:
             r = requests.post(url, json=body, headers=headers, timeout=90)
-            print(f"TRY {model} -> {r.status_code} {r.text[:800]}")
+            print(f"TRY {model} -> {r.status_code}")
             if r.status_code == 200:
                 txt = r.json()["candidates"][0]["content"]["parts"][0]["text"]
                 print(f"OK {model}")
                 return txt, "ok"
-            last_error = f"{model} {r.status_code}: {r.text[:2000]}"
+            last = r.text[:2000]
+            print(f"FAIL {model} {last[:500]}")
         except Exception as e:
-            last_error = str(e)
-    return f"❌ Error: {last_error}", "error"
+            last = str(e)
+    return f"❌ {last}", "error"
 
 def send_text(jid, text):
     url = f"{EVOLUTION_API_URL}/message/sendText/{EVOLUTION_INSTANCE}"
@@ -115,7 +115,7 @@ def webhook():
         text = caption or text or "幫我批改呢份手寫功課"
     elif "documentMessage" in msg:
         b64, mime = get_file_base64(data, is_pdf=True)
-        text = text or "幫我批改PDF功課"
+        text = text or "幫我批改PDF"
         mime = "application/pdf"
     if not text and not b64:
         text = "Hello"
@@ -134,7 +134,7 @@ def webhook():
 
 @app.route("/", methods=["GET"])
 def home():
-    return f"LC Sir Final Fix Live MODEL={MODELS[0]}", 200
+    return f"LC Sir Live 8s-Retry MODEL={MODELS[0]}", 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
