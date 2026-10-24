@@ -10,7 +10,7 @@ EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY")
 
 def solve_with_gemini(user_msg, image_b64=None):
     # USE 1.5-flash = most stable, works with free API key
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={GEMINI_API_KEY}"
     
     if not image_b64:
         prompt = f"你係LC Math嘅廣東話小助手，一定要用廣東話口語答(唔好用書面語)，好似香港人咁講嘢。答呢條數：{user_msg}"
