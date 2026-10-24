@@ -17,7 +17,7 @@ Use Step 1, Step 2, Step 3 format, short and clear.
 If graph needed, end with: GRAPH_EQUATION: <equation>
 """
 
-NEW models Oct 2026 — 3.1 Pro + 3.8 Flash — these work with AQ keys
+# NEW models Oct 2026 — 3.1 Pro + 3.8 Flash — these work with AQ keys
 MODELS = [
     "gemini-3.1-pro-preview",      # <-- Google told you to use this in screenshot
     "gemini-3.1-pro",
