@@ -11,8 +11,7 @@ EVOLUTION_INSTANCE = os.environ.get("EVOLUTION_INSTANCE")
 EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("models/gemini-3.8-flash")
-
+model = genai.GenerativeModel("gemini-3.8-flash")
 def solve_with_gemini(user_msg):
     prompt = f"你是LC math的小助手，用繁體中文，簡潔解答數學問題：{user_msg}"
     response = model.generate_content(prompt)
