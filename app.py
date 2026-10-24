@@ -78,7 +78,7 @@ def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
         try:
             r = requests.post(url, json=body, headers=headers, timeout=90)
             print(f"TRY {model} -> {r.status_code}")
-            if r.status_code == 200:
+            if r.status_code in [200, 201]:
                 txt = r.json()["candidates"][0]["content"]["parts"][0]["text"]
                 print(f"OK {model}")
                 return txt, "ok"
