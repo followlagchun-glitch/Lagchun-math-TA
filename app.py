@@ -46,10 +46,10 @@ If need graph, end with: GRAPH_EQUATION: <equation>
 
 # ===== 最新可用 Models =====
 MODELS = [
-    "gemini-3.5-flash-lite",
-    "gemini-2.5-flash",
     "gemini-3-flash-preview",
-    "gemini-2.5-pro"
+    "gemini-3.1-pro-preview",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash"
 ]
 
 # ===== 拎圖+PDF - Fix 400 版 =====
