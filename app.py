@@ -10,35 +10,32 @@ EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
 
 print(f"BOOT AQ len={len(GEMINI_API_KEY)}")
 
+# ===== 你的永久要求 (我記住咗) =====
+# LC SIR: HK Cantonese + 手寫批改 Good/Bad + Image+PDF + Desmos
 SYSTEM_PROMPT = """
 You are LC Sir - Hong Kong DSE Math Tutor, expert in marking handwritten work.
 
-TASK:
 Step 0 - OCR (MUST):
-- Read ALL handwritten + printed text in image/PDF line by line.
+- Carefully read ALL handwritten + printed text in image/PDF line by line.
 - List what student wrote.
 
-Step 1 - 判斷題目係咩
-
+Step 1 - 判斷題目
 Step 2 - 👍 做得好: 2-3 points
-
-Step 3 - 👎 做得唔好 / 錯咗: list errors, explain why in Cantonese
-
+Step 3 - 👎 做得唔好 / 錯咗: explain why in Cantonese
 Step 4 - 正確解法: Step 1,2,3 with LaTeX
-
 Step 5 - 建議: 1 tip
 
 Language: HK Cantonese 口語. Formulas English/LaTeX.
-If only printed question, skip Step 2/3.
 If need graph, end with: GRAPH_EQUATION: <equation>
 """
 
-# ===== 2026-10 最新可用 Models - 已 Fix 404 =====
+# ===== 2026-10-25 最新可用 (Fix 你張圖 404) =====
 MODELS = [
-    "gemini-3-flash-preview",
-    "gemini-3.1-pro-preview", 
-    "gemini-2.5-flash",
-    "gemini-2.0-flash"
+    "gemini-3.8-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3-flash-preview"
 ]
 
 def get_file_base64(data, is_pdf=False):
@@ -67,21 +64,17 @@ def get_file_base64(data, is_pdf=False):
         im = msg.get("imageMessage") or msg.get("documentMessage") or {}
         media_url = im.get("url") or im.get("mediaUrl")
         if media_url:
-            print(f"[M3] CDN {media_url[:150]}")
             r2 = requests.get(media_url, timeout=30)
             if r2.status_code == 200 and len(r2.content) > 1000:
                 b64 = base64.b64encode(r2.content).decode()
-                print(f"[M3] SUCCESS len={len(b64)}")
+                print(f"[M3] CDN SUCCESS len={len(b64)}")
                 return b64, "application/pdf" if is_pdf else "image/jpeg"
     except Exception as e:
         print(f"[M3] error {e}")
-
-    print("=== ALL FAILED ===")
+    print("ALL FAILED")
     return None, None
 
 def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
-    if len(GEMINI_API_KEY) < 20:
-        return f"❌ KEY empty len={len(GEMINI_API_KEY)}", "no_key"
     prompt = SYSTEM_PROMPT + f"\n\n學生傳來: {question}"
     last_error = ""
     for model in MODELS:
@@ -95,12 +88,11 @@ def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
             r = requests.post(url, json=body, headers=headers, timeout=90)
             print(f"TRY {model} -> {r.status_code}")
             if r.status_code == 200:
-                j = r.json()
-                txt = j["candidates"][0]["content"]["parts"][0]["text"]
+                txt = r.json()["candidates"][0]["content"]["parts"][0]["text"]
                 print(f"OK {model}")
                 return txt, "ok"
             last_error = r.text[:2000]
-            print(f"FAIL {model} {last_error[:500]}")
+            print(f"FAIL {model} {last_error[:400]}")
             continue
         except Exception as e:
             last_error = str(e)
@@ -153,7 +145,7 @@ def webhook():
 
 @app.route("/", methods=["GET"])
 def home():
-    return f"LC Sir Final Live len={len(GEMINI_API_KEY)} MODELS={MODELS[0]}", 200
+    return f"LC Sir Final Live len={len(GEMINI_API_KEY)} MODEL={MODELS[0]}", 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
