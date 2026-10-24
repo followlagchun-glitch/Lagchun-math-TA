@@ -1,5 +1,9 @@
 from flask import Flask, request, jsonify
 import os, requests, re, urllib.parse, base64, time
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import numpy as np
 
 app = Flask(__name__)
 
@@ -10,57 +14,41 @@ EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
 
 print(f"BOOT AQ len={len(GEMINI_API_KEY)}")
 
-# ===== LC SIR - 逐題順序口語版 (PDF友好) =====
+# ===== LC SIR - 逐題+每題視像化版 =====
 SYSTEM_PROMPT = """
 You are LC Sir, Hong Kong DSE Math tutor. Friendly, simple, not robotic.
 
 CRITICAL FORMATTING:
-- NEVER use $ $ or \\( \\) or \\frac \\text \\because. WhatsApp cannot show LaTeX.
-- Use plain math only: a = -1 < 0, y = 34/5, x^2, (x,y) = (1,6), sqrt(2)
-- Use *bold* for question titles, short lines, HK Cantonese 口語.
-- Talk like a real teacher marking homework.
+- NEVER use $ $ or \\frac \\text. Use plain math: a = -1 < 0, y = 34/5, x^2, (1,6), sqrt(2)
+- Use *bold* for titles, short lines, HK Cantonese.
+- MUST mark by question order for PDF.
 
-OUTPUT RULE - MUST FOLLOW QUESTION ORDER (for PDF):
-This is very important. Student gets confused if you group good/bad together.
-
-1. First, scan and say what questions you see, e.g. "見到 Q14, Q15, Q16 三題"
-
-2. Then mark ONE BY ONE in order. For EACH question, use this exact template:
-
+OUTPUT RULE:
+1. List questions seen: "見到 Q14, Q15"
+2. For EACH question in order:
 ---
 *Q14 (a) 開口方向*
 你寫咗： a = -1 < 0
-睇法： ❌ 爭少少，呢個係原因，唔係方向
-應該點寫： 因為 x^2 係數係 -2 < 0，所以係 向下 Downwards 咁先攞足分
----
+睇法： ❌ 爭少，呢個係原因
+應該點寫： 因為 -2 < 0，所以係 向下 Downwards
 
----
-*Q14 (b) y-intercept*
-你寫咗： 6
-睇法： ✅ 啱晒，做得好，攞足分
----
+3. VERY IMPORTANT - VISUALIZATION:
+For EVERY question that is a function/graph (quadratic, linear, etc), you MUST add a line at the END of that question block:
+GRAPH_EQUATION: y = -2*x^2 + x
 
-Repeat same for Q15, Q16, Q17... follow the paper order.
+Examples:
+- If Q14 is y = -x^2 + x + 6, add: GRAPH_EQUATION: y = -x^2 + x + 6
+- If Q15 is y = 2x + 3, add: GRAPH_EQUATION: y = 2*x + 3
+- If question asks vertex, also add point if needed: GRAPH_EQUATION: y = -2*x^2 + x | POINT: (0.25, 0.125)
 
-3. After all questions, final summary:
-💡 總結：今次 Q14b 做得最好，Q15(a) 要留意返要寫坐標格式 (1,6) 唔好淨係寫 y=...
+You can have MULTIPLE GRAPH_EQUATION lines, one per question. This is required.
 
-RULES:
-- If correct: use ✅ 啱晒
-- If wrong/incomplete: use ❌ 要留意
-- Keep each question short, 3-4 lines max
-- No long paragraphs, no ### headers
-- No LaTeX ever
+4. Final summary: 💡 總結
 
-If need graph, at very end: GRAPH_EQUATION: y = -2*x^2 + x
+No LaTeX ever.
 """
 
-MODELS = [
-    "gemini-3.8-flash",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-3.5-flash"
-]
+MODELS = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.5-flash"]
 
 def clean_b64(b64):
     if not b64: return None
@@ -79,7 +67,7 @@ def get_file_base64(data, is_pdf=False):
             url = f"{EVOLUTION_API_URL}/chat/getBase64FromMediaMessage/{EVOLUTION_INSTANCE}"
             headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
             r = requests.post(url, json=payload, headers=headers, timeout=60)
-            print(f"[M1] {r.status_code} len={len(r.text)} Attempt {attempt+1}/5")
+            print(f"[M1] {r.status_code} Attempt {attempt+1}/5")
             if r.status_code in [200, 201]:
                 m = re.search(r'"base64"\s*:\s*"([^"]{1000,})"', r.text)
                 raw = m.group(1) if m else None
@@ -93,7 +81,6 @@ def get_file_base64(data, is_pdf=False):
                     try:
                         dec = base64.b64decode(b64, validate=False)
                         mt = "application/pdf" if is_pdf or dec[:4]==b'%PDF' else "image/jpeg"
-                        print(f"[M1] SUCCESS {len(dec)} bytes")
                         return b64, mt
                     except: pass
         except Exception as e:
@@ -115,8 +102,7 @@ def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
             r = requests.post(url, json=body, headers=headers, timeout=90)
             print(f"TRY {model} -> {r.status_code}")
             if r.status_code == 200:
-                txt = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-                return txt, "ok"
+                return r.json()["candidates"][0]["content"]["parts"][0]["text"], "ok"
             last_error = r.text[:1000]
         except Exception as e:
             last_error = str(e)
@@ -132,6 +118,34 @@ def send_text(jid, text):
     except Exception as e:
         print(f"Send fail {e}")
 
+def send_graph_image(jid, equation, q_label):
+    try:
+        # Try to parse y = ... 
+        eq = equation.split("|")[0].replace("y =","").replace("y=","").strip()
+        # Make it python eval safe: replace ^ with **
+        eq_py = eq.replace("^","**")
+        x = np.linspace(-5, 5, 400)
+        # Safe eval
+        y = eval(eq_py, {"x": x, "np": np, "sin": np.sin, "cos": np.cos, "tan": np.tan, "sqrt": np.sqrt})
+        plt.figure()
+        plt.plot(x, y)
+        plt.grid(True, alpha=0.3)
+        plt.title(f"{q_label}: {equation}")
+        plt.axhline(0, color='black', linewidth=0.5)
+        plt.axvline(0, color='black', linewidth=0.5)
+        tmp = f"/tmp/graph_{int(time.time())}.png"
+        plt.savefig(tmp, dpi=150, bbox_inches='tight')
+        plt.close()
+        with open(tmp, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+        url = f"{EVOLUTION_API_URL}/message/sendMedia/{EVOLUTION_INSTANCE}"
+        headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
+        payload = {"number": jid, "mediatype": "image", "media": b64, "caption": f"📈 {q_label} 視像化: {equation}"}
+        requests.post(url, json=payload, headers=headers, timeout=30)
+        print(f"Graph sent {q_label}")
+    except Exception as e:
+        print(f"Graph fail {e}: {equation}")
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     body = request.json or {}
@@ -140,20 +154,15 @@ def webhook():
     msg = data.get("message", {})
     jid = key.get("remoteJid")
     push_name = data.get("pushName") or ""
-    
-    if not jid or key.get("fromMe"): 
-        return jsonify({"ok": True}), 200
-
+    if not jid or key.get("fromMe"): return jsonify({"ok": True}), 200
     is_group = "@g.us" in jid
     text = msg.get("conversation") or msg.get("extendedTextMessage", {}).get("text") or ""
-    
     if is_group:
         low = text.lower()
         if not any(k in low for k in ["lc", "阿sir", "阿 sir", "sir", "老師"]) and "imageMessage" not in msg and "documentMessage" not in msg:
             if not msg.get("imageMessage", {}).get("caption"):
                 return jsonify({"ok": True}), 200
         text = f"[{push_name} 問]: {text}"
-
     b64, mime = None, "image/jpeg"
     if "imageMessage" in msg:
         b64, mime = get_file_base64(data, is_pdf=False)
@@ -163,35 +172,40 @@ def webhook():
         b64, mime = get_file_base64(data, is_pdf=True)
         text = (text or "幫我睇下呢份PDF功課").strip()
         mime = "application/pdf"
-
-    if not text and not b64: 
-        return jsonify({"ok": True}), 200
-
-    print(f"Incoming group={is_group} has_file={bool(b64)} text={text[:60]}")
-    
+    if not text and not b64: return jsonify({"ok": True}), 200
     if ("imageMessage" in msg or "documentMessage" in msg) and not b64:
         send_text(jid, "張圖仲 load 緊，麻煩 send 多次新相試試，唔好 forward 舊相 🙏")
         return jsonify({"ok": True}), 200
-
     answer, _ = call_gemini(text, b64, mime)
     
-    m = re.search(r"GRAPH_EQUATION:\s*(.+)", answer) if answer else None
-    if m:
-        eq = m.group(1).strip()
-        clean = answer.replace(m.group(0), "").strip()
-        send_text(jid, clean)
-        link = f"https://www.desmos.com/calculator?expressions={urllib.parse.quote(eq)}"
-        send_text(jid, f"📈 互動圖: {eq}\n{link}")
-    else:
-        if is_group and push_name:
-            answer = f"@{push_name} {answer}"
-        send_text(jid, answer)
+    # 找出所有 GRAPH_EQUATION (支援多題)
+    graphs = re.findall(r"GRAPH_EQUATION:\s*(.+)", answer)
+    clean_answer = re.sub(r"GRAPH_EQUATION:\s*.+", "", answer).strip()
+    
+    if is_group and push_name:
+        clean_answer = f"@{push_name} {clean_answer}"
+    send_text(jid, clean_answer)
+    
+    # 逐題 send 視像化
+    if graphs:
+        time.sleep(1)
+        for idx, eq in enumerate(graphs):
+            eq = eq.strip()
+            q_label = f"Q{idx+1}" if len(graphs)>1 else "本題"
+            # 提取 Q label 如果 Gemini 有寫
+            # Send Desmos + GeoGebra links
+            desmos_link = f"https://www.desmos.com/calculator?expressions={urllib.parse.quote(eq.split('|')[0])}"
+            geogebra_link = f"https://www.geogebra.org/graphing?lang=en&command={urllib.parse.quote(eq.split('|')[0])}"
+            send_text(jid, f"📊 {q_label} 視像化：{eq}\nDesmos: {desmos_link}\nGeoGebra: {geogebra_link}")
+            # Send 圖
+            send_graph_image(jid, eq, q_label)
+            time.sleep(1)
     
     return jsonify({"ok": True}), 200
 
 @app.route("/", methods=["GET"])
 def home():
-    return f"LC Sir FINAL v6 Q-Order len={len(GEMINI_API_KEY)}", 200
+    return f"LC Sir FINAL v7 Visual len={len(GEMINI_API_KEY)}", 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
