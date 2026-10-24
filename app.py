@@ -12,7 +12,7 @@ EVOLUTION_INSTANCE = os.environ.get("EVOLUTION_INSTANCE") # e.g. lc-math-bot
 EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-2.0-flash")
+model = genai.GenerativeModel("gemini-2.5-flash")
 
 def solve_with_gemini(user_msg):
     prompt = f"你是LC math的小助手，用繁體中文，簡潔解答數學問題：{user_msg}"
