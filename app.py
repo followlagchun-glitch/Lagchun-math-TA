@@ -18,9 +18,10 @@ If graph needed, end with: GRAPH_EQUATION: <equation>
 """
 
 MODELS = [
-    "gemini-3.1-pro-preview",
-    "gemini-3.8-flash",
-    "gemini-2.5-flash-lite"
+    "gemini-3.5-flash-lite",
+    "gemini-3-flash-preview",
+    "gemini-2.5-flash",
+    "gemini-2.5-pro"
 ]
 
 # ===== 新增：拎圖功能 (Fix 你而家睇唔到圖) =====
