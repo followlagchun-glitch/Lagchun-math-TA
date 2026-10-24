@@ -3,7 +3,7 @@ import os, requests, re, urllib.parse
 
 app = Flask(__name__)
 
-GEMINI_API_KEY = (os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY_1") or "").strip()
+GEMINI_API_KEY = (os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY") or "").strip()
 EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "").strip().rstrip("/")
 EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
