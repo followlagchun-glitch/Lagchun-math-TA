@@ -17,15 +17,28 @@ Use Step 1, Step 2, Step 3 format, short and clear.
 If graph needed, end with: GRAPH_EQUATION: <equation>
 """
 
-# NEW models Oct 2026 — 3.1 Pro + 3.8 Flash — these work with AQ keys
 MODELS = [
-    "gemini-3.1-pro-preview",      # <-- Google told you to use this in screenshot
-    "gemini-3.1-pro",
+    "gemini-3.1-pro-preview",
     "gemini-3.8-flash",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-2.5-flash-lite"        # fallback
+    "gemini-2.5-flash-lite"
 ]
+
+# ===== 新增：拎圖功能 (Fix 你而家睇唔到圖) =====
+def get_image_base64(data):
+    try:
+        url = f"{EVOLUTION_API_URL}/chat/getBase64FromMediaMessage/{EVOLUTION_INSTANCE}"
+        headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
+        r = requests.post(url, json={"message": data.get("message")}, headers=headers, timeout=30)
+        print(f"GetBase64 status {r.status_code}")
+        if r.status_code == 200:
+            j = r.json()
+            b64 = j.get("base64") or j.get("data") or j.get("base64String")
+            if b64 and "," in b64:  # 如果有 data:image/jpeg;base64, 前綴要切走
+                b64 = b64.split(",")[-1]
+            return b64
+    except Exception as e:
+        print(f"GetBase64 fail: {e}")
+    return None
 
 def call_gemini(question, image_b64=None):
     if len(GEMINI_API_KEY) < 20:
@@ -44,30 +57,18 @@ def call_gemini(question, image_b64=None):
 
         try:
             r = requests.post(url, json=body, headers=headers, timeout=90)
-            print(f"TRY {model} header -> {r.status_code} {r.text[:800]}")
-            
-            # Fallback ?key=
+            print(f"TRY {model} -> {r.status_code}")
             if r.status_code in [401, 403]:
                 r = requests.post(f"{url}?key={GEMINI_API_KEY}", json=body, headers={"Content-Type":"application/json"}, timeout=90)
-                print(f"Fallback {model} ?key -> {r.status_code} {r.text[:800]}")
-
             if r.status_code == 200:
                 j = r.json()
                 text = j["candidates"][0]["content"]["parts"][0]["text"]
                 return text, "ok", ""
-            
-            last_error = r.text  # Save real Google error
-            
-            if r.status_code == 429:
-                continue
-            continue
-
+            last_error = r.text
         except Exception as e:
             last_error = str(e)
-            print(f"EXC {model}: {e}")
             continue
 
-    # Return REAL Google error so you can see it
     return f"❌ Real error: {last_error[:1500]}", "error", last_error
 
 def send_text(jid, text):
@@ -86,9 +87,13 @@ def webhook():
     if not jid or "@g.us" in jid or key.get("fromMe"): return jsonify({"ok": True}), 200
     text = msg.get("conversation") or msg.get("extendedTextMessage", {}).get("text") or ""
     b64 = None
+    # ===== 修改位：用 get_image_base64 =====
     if "imageMessage" in msg:
-        b64 = msg["imageMessage"].get("base64") or data.get("message", {}).get("base64")
-        text = msg["imageMessage"].get("caption") or text or "幫我逐步計呢題"
+        b64 = get_image_base64(data)
+        caption = msg["imageMessage"].get("caption") or ""
+        text = caption or text or "幫我逐步計呢題"
+        print(f"Image b64 len={len(b64) if b64 else 0}")
+
     if not text and not b64: text = "1+3"
     answer, status, _ = call_gemini(text, b64)
     m = re.search(r"GRAPH_EQUATION:\s*(.+)", answer) if answer else None
