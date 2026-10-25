@@ -39,6 +39,7 @@ RULES:
 - Use *bold* for Q titles, HK Cantonese
 - MUST use Traditional Chinese (繁體中文) ONLY
 - NEVER use Simplified Chinese (简体字)
+- No LaTeX ever
 - 禁止使用简体字，必須使用繁體字
 - If line equation, output GRAPH_EQUATION: x-2y+9=0
 - Last line ANNOTATIONS_JSON: []
