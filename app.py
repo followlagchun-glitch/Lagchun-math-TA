@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-import os, requests, re, urllib.parse, base64, time, json, threading
+import os, requests, re, urllib.parse, base64, time, json, threading, io
 app = Flask(__name__)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "").strip().rstrip("/")
@@ -31,7 +31,7 @@ print(f"BOOT FINAL 3-IN-1 len={len(GEMINI_API_KEY)}")
 SYSTEM_PROMPT = """You are LC Sir, Hong Kong DSE Math tutor. Friendly, simple, short, like a real person.
 CRITICAL RULES:
 - NEVER use $ $ or \\frac \\text or ^ or sqrt().
-- MUST use pretty Unicode math only: 次方用 ² ³，開方用 √，分數用 ½ ¼ ¾ 或 ⁄，乘除用 × ÷
+- MUST use pretty Unicode math only: 次方用 ² ³，開方用 ½ ¼ ¾ 或 ⁄，乘除用 × ÷
 - Use *bold* for Q titles, short lines, HK Cantonese口語.
 - No LaTeX ever.
 OUTPUT FORMAT - PDF功課改卷模式:
@@ -52,7 +52,7 @@ GRAPH_EQUATION: 如果有圖就加 y = ...
 最後一定要加 ANNOTATIONS_JSON: [{"label":"3²計錯","x":0.5,"y":0.4}] x,y係0-1座標。全對就 []
 """
 
-MODELS = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.5-flash"]
+MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
 
 def clean_b64(b64):
     if not b64: return None
@@ -61,8 +61,9 @@ def clean_b64(b64):
     b64=b64.replace("\n","").replace("\r","").replace(" ","")
     b64+="="*(-len(b64)%4)
     return b64
+
 def get_file_base64(data, is_pdf=False):
-    time.sleep(3)
+    time.sleep(2)
     for attempt in range(5):
         try:
             payload={"message": data}
@@ -73,16 +74,20 @@ def get_file_base64(data, is_pdf=False):
                 m=re.search(r'"base64"\s*:\s*"([^"]{1000,})"', r.text)
                 raw=m.group(1) if m else None
                 if not raw:
-                    try: raw=r.json().get("base64") or r.json().get("data")
+                    try: 
+                        j=r.json()
+                        raw=j.get("base64") or j.get("data", {}).get("base64") if isinstance(j.get("data"), dict) else j.get("data")
                     except: pass
                 b64=clean_b64(raw) if raw else None
                 if b64 and len(b64)>1000:
                     dec=base64.b64decode(b64, validate=False)
                     mt="application/pdf" if is_pdf or dec[:4]==b'%PDF' else "image/jpeg"
+                    print(f"[MEDIA DL OK] len={len(b64)} mime={mt}")
                     return b64, mt
         except Exception as e: print(f"[M1] err {e}")
-        if attempt<4: time.sleep(8)
+        if attempt<4: time.sleep(5)
     return None, None
+
 def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
     prompt=SYSTEM_PROMPT+f"\n\n學生: {question}"
     last_error=""
@@ -123,9 +128,9 @@ def send_text(jid, text):
 # ===== 功能1: 紅圈原圖 =====
 def create_annotated_image(original_b64, annotations):
     try:
-        from PIL import Image, ImageDraw
-        import io
-        img_data = base64.b64decode(original_b64)
+        print(f"[ANNOTATE] start len={len(original_b64)} ann={annotations}")
+        from PIL import Image, ImageDraw, ImageFont
+        img_data = base64.b64decode(clean_b64(original_b64))
         img = Image.open(io.BytesIO(img_data)).convert("RGB")
         draw = ImageDraw.Draw(img)
         w, h = img.size
@@ -143,21 +148,35 @@ def create_annotated_image(original_b64, annotations):
                 except: continue
         out_path = "/tmp/annotated.jpg"
         img.save(out_path, "JPEG", quality=92)
-        return out_path
+        with open(out_path, "rb") as f:
+            b64_out = base64.b64encode(f.read()).decode()
+        print(f"[ANNOTATE] done len={len(b64_out)}")
+        return b64_out
     except Exception as e:
         print(f"[ANNOTATE ERR] {e}"); return None
 
-def send_image(jid, image_b64, caption):
-    # 試法 1: JSON base64 (新版 Evolution 用呢個)
+def send_image(jid, image_input, caption):
+    # image_input 可以係路徑 /tmp/xxx.jpg 或者 base64
     try:
+        b64_data = None
+        if isinstance(image_input, str) and os.path.exists(image_input):
+            with open(image_input, "rb") as f:
+                b64_data = base64.b64encode(f.read()).decode()
+            print(f"[SEND IMAGE] from path {image_input} -> b64 len={len(b64_data)}")
+        else:
+            b64_data = clean_b64(image_input)
+        
+        if not b64_data or len(b64_data) < 1000:
+            print(f"[SEND IMAGE] invalid b64 len")
+            return False
+
+        # 試法 1: JSON base64
         url = f"{EVOLUTION_API_URL}/message/sendMedia/{EVOLUTION_INSTANCE}"
         headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
-        # 確保冇 data:image 前綴
-        if "," in image_b64[:100]: image_b64 = image_b64.split(",")[-1]
         payload = {
             "number": jid,
             "mediatype": "image",
-            "media": image_b64,
+            "media": b64_data,
             "caption": caption,
             "fileName": "marked.jpg"
         }
@@ -165,25 +184,20 @@ def send_image(jid, image_b64, caption):
         print(f"[SEND IMAGE 1] {r.status_code} {r.text[:500]}")
         if r.status_code in [200, 201]:
             return True
-    except Exception as e:
-        print(f"[SEND IMAGE 1 ERR] {e}")
 
-    # 試法 2: form-data upload (舊版)
-    try:
-        import io
-        url = f"{EVOLUTION_API_URL}/message/sendMedia/{EVOLUTION_INSTANCE}"
-        headers = {"apikey": EVOLUTION_API_KEY}
-        img_bytes = base64.b64decode(image_b64)
+        # 試法 2: form-data
+        img_bytes = base64.b64decode(b64_data)
         files = {"media": ("marked.jpg", io.BytesIO(img_bytes), "image/jpeg")}
         data = {"number": jid, "mediatype": "image", "caption": caption, "fileName": "marked.jpg"}
-        r = requests.post(url, headers=headers, data=data, files=files, timeout=30)
-        print(f"[SEND IMAGE 2] {r.status_code} {r.text[:500]}")
-        return r.status_code in [200, 201]
+        headers2 = {"apikey": EVOLUTION_API_KEY}
+        r2 = requests.post(url, headers=headers2, data=data, files=files, timeout=30)
+        print(f"[SEND IMAGE 2] {r2.status_code} {r2.text[:500]}")
+        return r2.status_code in [200, 201]
     except Exception as e:
-        print(f"[SEND IMAGE 2 ERR] {e}")
+        print(f"[SEND IMAGE ERR] {e}")
         return False
 
-# ===== 功能2: 網上下載函數圖 (唔用 matplotlib) =====
+# ===== 功能2: 網上下載函數圖 =====
 def download_graph_from_api(equation_str, out_path="/tmp/graph.jpg"):
     try:
         import numpy as np
@@ -202,12 +216,13 @@ def download_graph_from_api(equation_str, out_path="/tmp/graph.jpg"):
                 "labels": xs,
                 "datasets": [{"label": equation_str, "data": ys, "fill": False, "borderColor": "red", "pointRadius": 0, "borderWidth": 2}]
             },
-            "options": {"title": {"display": True, "text": equation_str}, "scales": {"x": {"type": "linear", "position": "bottom"}}}
+            "options": {"title": {"display": True, "text": equation_str}}
         }
         url = f"https://quickchart.io/chart?c={urllib.parse.quote(json.dumps(chart_config))}&width=600&height=400&backgroundColor=white"
         r = requests.get(url, timeout=25)
         if r.status_code == 200 and len(r.content) > 5000:
             with open(out_path, "wb") as f: f.write(r.content)
+            print(f"[GRAPH DL OK] {eq}")
             return out_path
     except Exception as e:
         print(f"[GRAPH DL ERR] {e} eq={equation_str}")
@@ -301,12 +316,12 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
     # 1. 紅圈原圖
     if b64 and mime != "application/pdf":
         if "❌" in clean_answer or annotations:
-            img_path = create_annotated_image(b64, annotations)
-            if img_path:
+            img_b64 = create_annotated_image(b64, annotations)
+            if img_b64:
                 time.sleep(0.8)
-                send_image(jid, img_path, f"@{push_name} 睇圖，紅圈就係錯嘅位")
+                send_image(jid, img_b64, f"@{push_name} 睇圖，紅圈就係錯嘅位")
 
-    # 2. 函數圖直接網上下載
+    # 2. 函數圖
     if graphs:
         time.sleep(0.8)
         for idx, eq in enumerate(graphs):
