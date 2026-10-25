@@ -5,7 +5,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "").strip().rstrip("/")
 EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
-TEACHER_NUMBERS = ["85246447827", "66838738371"]
+# 淨係你先可以開關
+TEACHER_NUMBERS = ["85246447827"]
 
 STATE_FILE = "/tmp/group_state.json"
 def load_state():
@@ -24,7 +25,7 @@ def save_state():
         print(f"[SAVE_STATE] err {e}")
 
 GROUP_STATE = load_state()
-print(f"BOOT FINAL ALWAYS-OPEN len={len(GEMINI_API_KEY)} state={GROUP_STATE}")
+print(f"BOOT FINAL TEACHER-ONLY len={len(GEMINI_API_KEY)} state={GROUP_STATE}")
 
 SYSTEM_PROMPT = """You are LC Sir, Hong Kong DSE Math tutor. Friendly, simple, short, like a real person.
 CRITICAL RULES:
@@ -114,44 +115,56 @@ def webhook():
     text=msg.get("conversation") or msg.get("extendedTextMessage", {}).get("text") or ""
     if not text and "imageMessage" in msg: text=msg["imageMessage"].get("caption") or ""
     print(f"[IN] fromMe={from_me} jid={jid} part={participant} text={text[:80]}")
+
     def is_teacher_user():
         if from_me: return True
         digits=re.sub(r'\D','', participant if is_group else jid)
         return any(t in digits for t in TEACHER_NUMBERS)
+
     if is_group:
         if jid not in GROUP_STATE:
             GROUP_STATE[jid]=True
             save_state()
         low=text.lower().strip()
-        # === 開放關鍵字，加晒你講嘅 ===
         open_keys = ["開放提問","開放發問","開始發問","開始提問","開放功課","/open","開始"]
+        close_keys = ["關閉提問","關閉發問","結束提問","結束發問","/close","停止發問","收工","關閉","結束"]
+
+        # 老師專用開關
         if any(k in text for k in open_keys) or low in ["open","開始","開放"]:
+            if not is_teacher_user():
+                # 同學亂打唔理，唔回覆避免洗版，或者你想提示就開下面呢行
+                # send_text(jid, "⚠️ 只有老師可以開放提問")
+                return jsonify({"ok": True}), 200
             GROUP_STATE[jid]=True; save_state()
             send_text(jid, "✅ 【提問開始】\n老師已開放提問！依家同學可以問 LC Sir 喇～\n👉 打法：LC 幫我睇下呢題 + 相\n(會一直開住，直到老師打「關閉提問」先關)")
             return jsonify({"ok": True}), 200
-        # === 關閉關鍵字，加晒 ===
-        close_keys = ["關閉提問","關閉發問","結束提問","結束發問","/close","停止發問","收工","關閉","結束"]
+
         if any(k in text for k in close_keys) or low in ["close","關閉","結束"]:
+            if not is_teacher_user():
+                return jsonify({"ok": True}), 200
             GROUP_STATE[jid]=False; save_state()
             send_text(jid, "🔒 【提問結束】\n老師已關閉提問，LC Sir 休息中～\n同學暫時唔可以再問喇，等下次開放！")
             return jsonify({"ok": True}), 200
+
         if not GROUP_STATE[jid]:
             if any(k in low for k in ["lc","阿sir","阿 sir","sir","老師"]) or "imageMessage" in msg or "documentMessage" in msg:
                 if not is_teacher_user():
                     if any(k in low for k in ["lc","sir","老師"]):
                         send_text(jid, "⏳ 而家未開放提問，等老師講「開始提問」先可以問 LC Sir 呀～")
                     return jsonify({"ok": True}), 200
+
     if from_me and not is_group: return jsonify({"ok": True}), 200
     if from_me and is_group:
-        # from_me 都要放行開放/關閉所有講法
-        if not any(k in text for k in ["開放","開始","關閉","結束","/open","/close","open","close"]):
+        if not any(k in text for k in ["開放","開始","關閉","結束","/open","/close","open","close","lc","阿sir","老師"]):
             return jsonify({"ok": True}), 200
+
     if is_group:
         low=text.lower()
         if not any(k in low for k in ["lc","阿sir","阿 sir","sir","老師"]) and "imageMessage" not in msg and "documentMessage" not in msg:
             if not msg.get("imageMessage", {}).get("caption"):
                 return jsonify({"ok": True}), 200
         text=f"[{push_name} 問]: {text}"
+
     b64,mime=None,"image/jpeg"
     if "imageMessage" in msg:
         b64,mime=get_file_base64(data, is_pdf=False)
@@ -165,11 +178,16 @@ def webhook():
     if ("imageMessage" in msg or "documentMessage" in msg) and not b64:
         send_text(jid, "張圖仲 load 緊，麻煩 send 多次新相，唔好 forward 舊相 🙏")
         return jsonify({"ok": True}), 200
+
+    # === 輸入中功能喺呢度 ===
     stop_typing = threading.Event()
     t = threading.Thread(target=send_typing, args=(jid, stop_typing), daemon=True)
     t.start()
+
     answer,_=call_gemini(text, b64, mime)
+
     stop_typing.set()
+
     graphs=re.findall(r"GRAPH_EQUATION:\s*(.+)", answer)
     clean_answer=re.sub(r"GRAPH_EQUATION:\s*.+", "", answer).strip()
     if is_group and push_name: clean_answer=f"@{push_name} {clean_answer}"
@@ -186,7 +204,7 @@ def webhook():
     return jsonify({"ok": True}), 200
 
 @app.route("/", methods=["GET"])
-def home(): return f"LC Sir ALWAYS-OPEN len={len(GEMINI_API_KEY)} state={GROUP_STATE}", 200
+def home(): return f"LC Sir TEACHER-ONLY len={len(GEMINI_API_KEY)} state={GROUP_STATE}", 200
 @app.route("/health", methods=["GET"])
 def health(): return "ok", 200
 if __name__=="__main__":
