@@ -169,38 +169,68 @@ def send_image(jid, image_input, caption):
         print(f"[SEND IMAGE ERR] {e}"); return False
 def download_graph_from_api(equation_str, out_path="/tmp/graph.jpg"):
     try:
-        import numpy as np
+        import numpy as np, sympy as sp
         eq_raw = equation_str.strip()
-        is_circle = False
-        h = k = r_val = None
-        circ_match = re.search(r'\(x\s*([+-]\s*\d*\.?\d+)?\)\s*\^?2?²?\s*\+\s*\(y\s*([+-]\s*\d*\.?\d+)?\)\s*\^?2?²?\s*=\s*(\d+\.?\d*)', eq_raw.replace(" ", ""))
+        eq_raw_clean = eq_raw.replace("圖像","").strip()
+        
+        # 1. 圓形 (x-1)^2+(y-3)^2=20
+        circ_match = re.search(r'\(x\s*([+-]\s*\d*\.?\d+)?\)\s*\^?2?²?\s*\+\s*\(y\s*([+-]\s*\d*\.?\d+)?\)\s*\^?2?²?\s*=\s*(\d+\.?\d*)', eq_raw_clean.replace(" ", ""))
+        points = []
         if circ_match:
             try:
-                h_str = (circ_match.group(1) or "0").replace(" ", "")
-                k_str = (circ_match.group(2) or "0").replace(" ", "")
-                h = -float(h_str) if h_str else 0
-                k = -float(k_str) if k_str else 0
+                h_str = (circ_match.group(1) or "0").replace(" ", ""); k_str = (circ_match.group(2) or "0").replace(" ", "")
+                h = -float(h_str) if h_str else 0; k = -float(k_str) if k_str else 0
                 r_val = float(circ_match.group(3))**0.5
-                is_circle = True
+                for th in np.linspace(0, 2*np.pi, 150):
+                    points.append({"x": float(h + r_val*np.cos(th)), "y": float(k + r_val*np.sin(th))})
+            except: points = []
+        
+        # 2. 直線 / 函數 - 用 sympy 解 y
+        if not points:
+            try:
+                # 將 ² ³ 轉返 ** 
+                eq_for_sym = eq_raw_clean.replace("²","**2").replace("³","**3").replace("^","**")
+                x, y = sp.symbols('x y')
+                # 把 = 左右分開
+                if "=" in eq_for_sym:
+                    left, right = eq_for_sym.split("=", 1)
+                    expr = sp.sympify(left) - sp.sympify(right)
+                    # 解 y = ...
+                    sol = sp.solve(expr, y)
+                    if sol:
+                        y_expr = sol[0]
+                        print(f"[GRAPH] solved {eq_raw_clean} -> y={y_expr}")
+                        for xv in np.linspace(-10, 10, 200):
+                            try:
+                                yv = float(y_expr.subs(x, xv))
+                                if abs(yv) < 100:
+                                    points.append({"x": float(xv), "y": yv})
+                            except: pass
+            except Exception as e:
+                print(f"[GRAPH SYMPY ERR] {e}")
+        
+        # 3. 舊式 y= 備用
+        if not points:
+            try:
+                eq = eq_raw_clean.replace("y=","").replace("y =","").strip()
+                eq_py = eq.replace("^","**").replace("²","**2").replace("³","**3")
+                for xv in np.linspace(-10, 10, 200):
+                    try:
+                        yv = eval(eq_py, {"x": float(xv), "np": np, "sin": np.sin, "cos": np.cos, "sqrt": np.sqrt, "log": np.log, "exp": np.exp, "tan": np.tan})
+                        if yv is not None and abs(float(yv)) < 100:
+                            points.append({"x": float(xv), "y": float(yv)})
+                    except: pass
             except: pass
-        points = []
-        if is_circle:
-            for th in np.linspace(0, 2*np.pi, 150):
-                points.append({"x": float(h + r_val*np.cos(th)), "y": float(k + r_val*np.sin(th))})
-        else:
-            eq = eq_raw.replace("y=","").replace("y =","").strip()
-            eq_py = eq.replace("^","**").replace("²","**2").replace("³","**3")
-            for xv in np.linspace(-10, 10, 200):
-                try:
-                    yv = eval(eq_py, {"x": float(xv), "np": np, "sin": np.sin, "cos": np.cos, "sqrt": np.sqrt, "log": np.log, "exp": np.exp, "tan": np.tan})
-                    if yv is not None and abs(float(yv)) < 100:
-                        points.append({"x": float(xv), "y": float(yv)})
-                except: pass
+
+        if not points:
+            print(f"[GRAPH] no points for {eq_raw}")
+            return None
+
         chart_config = {
             "type": "scatter",
-            "data": {"datasets": [{"label": eq_raw, "data": points, "showLine": True, "fill": False, "borderColor": "#e11d48", "backgroundColor": "#e11d48", "pointRadius": 0, "borderWidth": 3}]},
+            "data": {"datasets": [{"label": eq_raw_clean, "data": points, "showLine": True, "fill": False, "borderColor": "#e11d48", "backgroundColor": "#e11d48", "pointRadius": 0, "borderWidth": 3}]},
             "options": {
-                "title": {"display": True, "text": eq_raw, "fontSize": 16},
+                "title": {"display": True, "text": eq_raw_clean, "fontSize": 16},
                 "scales": {"x": {"type": "linear", "position": "bottom"}, "y": {}},
                 "legend": {"display": False}
             }
@@ -209,7 +239,7 @@ def download_graph_from_api(equation_str, out_path="/tmp/graph.jpg"):
         r = requests.get(url, timeout=25)
         if r.status_code == 200 and len(r.content) > 3000:
             with open(out_path, "wb") as f: f.write(r.content)
-            print(f"[GRAPH DL OK] {eq_raw}")
+            print(f"[GRAPH DL OK] {eq_raw_clean}")
             return out_path
     except Exception as e:
         print(f"[GRAPH DL ERR] {e} eq={equation_str}")
