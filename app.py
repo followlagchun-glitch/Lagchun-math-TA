@@ -8,8 +8,8 @@ EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "").strip().rstrip("/")
 EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
 
-# 鎖死：你而家用緊 +85246447827 同埋 +66838738371 兩個都係老師
-TEACHER_JIDS = ["+85246447827@s.whatsapp.net", "+85246447827", "+66838738371@s.whatsapp.net", "+66838738371"]
+# 鎖死：你而家用緊 +85246447827 同埋 +66838738371 兩個都係老師 - 唔可以有+號
+TEACHER_JIDS = ["85246447827@s.whatsapp.net", "85246447827", "66838738371@s.whatsapp.net", "66838738371"]
 
 print(f"BOOT AQ len={len(GEMINI_API_KEY)} TEACHER=852+668")
 
