@@ -8,10 +8,10 @@ EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "").strip().rstrip("/")
 EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
 
-# 鎖死：兩個都係老師 - 用數字比對，咩格式都認到
+# 鎖死：兩個都係老師
 TEACHER_NUMBERS = ["85246447827", "66838738371"]
 
-print(f"BOOT AQ len={len(GEMINI_API_KEY)} TEACHER=852+668")
+print(f"BOOT AQ len={len(GEMINI_API_KEY)} TEACHER=852+668 FIX_FROMME")
 
 GROUP_STATE = {}
 
@@ -112,23 +112,30 @@ def webhook():
     jid = key.get("remoteJid")
     push_name = data.get("pushName") or ""
     participant = key.get("participant") or data.get("participant") or ""
-    if not jid or key.get("fromMe"): return jsonify({"ok": True}), 200
+    from_me = key.get("fromMe", False)
+
+    if not jid:
+        return jsonify({"ok": True}), 200
 
     is_group = "@g.us" in jid
     text = msg.get("conversation") or msg.get("extendedTextMessage", {}).get("text") or ""
     if not text and "imageMessage" in msg:
         text = msg["imageMessage"].get("caption") or ""
 
+    print(f"[IN] fromMe={from_me} jid={jid} part={participant} text={text[:100]}")
+
+    # 老師判斷：抽數字，fromMe都當係老師（因為Instance就係老師號碼）
     def is_teacher_user():
+        if from_me:
+            return True  # Instance自己發出嘅，一定係老師
         check_id = participant if is_group else jid
-        # 抽晒所有數字出嚟比對，例如 85246447827:13@lid -> 8524644782713，都會包含 85246447827
         digits = re.sub(r'\D', '', check_id)
-        print(f"[TEACHER_CHECK] raw={check_id} digits={digits}")
         for t in TEACHER_NUMBERS:
-            if t in digits or digits.endswith(t) or t in check_id:
+            if t in digits or t in check_id:
                 return True
         return False
 
+    # === 課堂鎖邏輯 - 要喺 fromMe check 之前 ===
     if is_group:
         if jid not in GROUP_STATE:
             GROUP_STATE[jid] = False
@@ -139,7 +146,7 @@ def webhook():
                 GROUP_STATE[jid] = True
                 send_text(jid, f"✅ 老師已開放提問，依家同學可以問 LC Sir 喇！\n打法：LC 幫我睇下呢題")
             else:
-                send_text(jid, f"⛔ 只有老師先可以開放提問呀～ (你: {participant})")
+                send_text(jid, f"⛔ 只有老師先可以開放提問呀～")
             return jsonify({"ok": True}), 200
         
         if any(k in text for k in ["關閉提問", "關閉發問", "/close", "停止發問", "收工"]) or low == "close":
@@ -156,6 +163,14 @@ def webhook():
                     if any(k in low for k in ["lc", "sir", "老師"]):
                         send_text(jid, "⏳ 而家未開放提問，等老師講「開放提問」先可以問 LC Sir 呀～")
                     return jsonify({"ok": True}), 200
+
+    # 私聊先擋 fromMe，群組唔擋（因為老師命令已經處理咗）
+    if from_me and not is_group:
+        return jsonify({"ok": True}), 200
+    if from_me and is_group:
+        # 群組入面，自己人講嘢如果唔係指令，就唔處理，避免loop
+        if not any(k in text.lower() for k in ["開放提問","關閉提問","/open","/close","open","close"]):
+            return jsonify({"ok": True}), 200
 
     if is_group:
         low = text.lower()
@@ -198,7 +213,7 @@ def webhook():
 
 @app.route("/", methods=["GET"])
 def home():
-    return f"LC Sir LIGHT v10 Teacher-Lock len={len(GEMINI_API_KEY)}", 200
+    return f"LC Sir LIGHT v10 Teacher-Lock FIX_FROMME len={len(GEMINI_API_KEY)}", 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
