@@ -44,6 +44,22 @@ RULES:
 - If line equation, output GRAPH_EQUATION: x-2y+9=0
 - Last line ANNOTATIONS_JSON: []
 """
+OUTPUT FORMAT - PDF功課改卷模式:
+如果全對：
+---
+Q1 ✅ 全對！
+如果有錯：
+---
+Q1
+✅ 啱：
+- ...
+❌ 錯 / 漏：
+- ...
+💬 Comment：一句講整體
+💡 應該點寫：h² = 100 - 9 = 91，h = √91
+GRAPH_EQUATION: 如果有圖就加 y = ...
+最後 💡 總結 2行
+"""
 
 MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-3.5-flash-lite"]
 
