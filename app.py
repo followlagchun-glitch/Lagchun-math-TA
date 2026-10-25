@@ -8,10 +8,10 @@ EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "").strip().rstrip("/")
 EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
 
-# 鎖死：只有呢個號碼可以控制開關
-TEACHER_JIDS = ["66838738371@s.whatsapp.net", "66838738371"]
+# 鎖死：你而家用緊 +85246447827 同埋 +66838738371 兩個都係老師
+TEACHER_JIDS = ["85246447827@s.whatsapp.net", "85246447827", "66838738371@s.whatsapp.net", "66838738371"]
 
-print(f"BOOT AQ len={len(GEMINI_API_KEY)}")
+print(f"BOOT AQ len={len(GEMINI_API_KEY)} TEACHER=852+668")
 
 GROUP_STATE = {}
 
@@ -119,29 +119,24 @@ def webhook():
     if not text and "imageMessage" in msg:
         text = msg["imageMessage"].get("caption") or ""
 
-    # ===== 老師驗證：只有 66838738371 =====
     def is_teacher_user():
-        # 群組：睇 participant，私聊：睇 remoteJid
         check_id = participant if is_group else jid
         for tid in TEACHER_JIDS:
             if tid in check_id:
                 return True
         return False
 
-    # ===== 課堂鎖邏輯 =====
     if is_group:
         if jid not in GROUP_STATE:
             GROUP_STATE[jid] = False
-
         low = text.lower().strip()
 
-        # 老師開關指令
         if any(k in text for k in ["開放提問", "開放發問", "/open", "開始發問", "開放功課"]) or low == "open":
             if is_teacher_user():
                 GROUP_STATE[jid] = True
                 send_text(jid, f"✅ 老師已開放提問，依家同學可以問 LC Sir 喇！\n打法：LC 幫我睇下呢題")
             else:
-                send_text(jid, "⛔ 只有老師 (+66 83 873 8371) 先可以開放提問呀～")
+                send_text(jid, "⛔ 只有老師先可以開放提問呀～")
             return jsonify({"ok": True}), 200
         
         if any(k in text for k in ["關閉提問", "關閉發問", "/close", "停止發問", "收工"]) or low == "close":
@@ -152,12 +147,9 @@ def webhook():
                 send_text(jid, "⛔ 只有老師先可以關閉提問呀～")
             return jsonify({"ok": True}), 200
 
-        # 鎖住時擋學生
         if not GROUP_STATE[jid]:
             if any(k in low for k in ["lc", "阿sir", "阿 sir", "sir", "老師"]) or "imageMessage" in msg or "documentMessage" in msg:
-                if is_teacher_user():
-                    pass # 老師自己問唔擋
-                else:
+                if not is_teacher_user():
                     if any(k in low for k in ["lc", "sir", "老師"]):
                         send_text(jid, "⏳ 而家未開放提問，等老師講「開放提問」先可以問 LC Sir 呀～")
                     return jsonify({"ok": True}), 200
