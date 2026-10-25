@@ -31,7 +31,7 @@ OUTPUT FORMAT - PDF功課改卷模式:
 如果全對：--- *Q1* ✅ 全對！做得好靚，繼續保持！
 如果有錯：--- *Q1* ✅ 啱嘅地方：- ... ❌ 錯 / 漏嘅地方：- ... 💬 Comment：一句講整體 💡 應該點寫：h² = 100 - 9 = 91，h = √91 GRAPH_EQUATION: 如果有圖就加 y = ... 最後 💡 總結 2行 最後一定要加 ANNOTATIONS_JSON: [{"label":"3²計錯","x":0.5,"y":0.4}] x,y係0-1座標。全對就 []
 """
-MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"]
+MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.5-flash-lite"]
 def clean_b64(b64):
     if not b64: return None
     b64=b64.strip()
