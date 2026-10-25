@@ -8,9 +8,13 @@ EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "").strip().rstrip("/")
 EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
 
+# 鎖死：只有呢個號碼可以控制開關
+TEACHER_JIDS = ["66838738371@s.whatsapp.net", "66838738371"]
+
 print(f"BOOT AQ len={len(GEMINI_API_KEY)}")
 
-# ===== LC SIR - 輕量最終版：逐題 + 每題視像化 =====
+GROUP_STATE = {}
+
 SYSTEM_PROMPT = """
 You are LC Sir, Hong Kong DSE Math tutor. Friendly, simple, short, like a real person.
 
@@ -21,7 +25,6 @@ CRITICAL RULES:
   開方用 √，例如 a = √100 = 10, b = √289 = 17
   分數用 ½ ¼ ¾ 或 ⁄，例如 y = 34⁄5, 3⁄4
   乘除用 × ÷，例如 6 × 8, 100 ÷ 4
-  比較用 ≤ ≥ < > 
 - Use *bold* for Q titles, short lines, HK Cantonese口語.
 - For PDF with many Qs, MUST mark by question order.
 
@@ -37,8 +40,6 @@ OUTPUT FORMAT:
 3. VISUALIZATION - MUST:
 For EVERY function/graph question, add ONE line after that Q:
 GRAPH_EQUATION: y = -2*x^2 + x
-You can have multiple GRAPH_EQUATION lines, one per Q. This is required for visualization.
-
 4. End: 💡 總結：... simple 2 lines
 No LaTeX ever.
 """
@@ -61,7 +62,6 @@ def get_file_base64(data, is_pdf=False):
             url = f"{EVOLUTION_API_URL}/chat/getBase64FromMediaMessage/{EVOLUTION_INSTANCE}"
             headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
             r = requests.post(url, json=payload, headers=headers, timeout=60)
-            print(f"[M1] {r.status_code} Attempt {attempt+1}/5")
             if r.status_code in [200, 201]:
                 m = re.search(r'"base64"\s*:\s*"([^"]{1000,})"', r.text)
                 raw = m.group(1) if m else None
@@ -73,8 +73,7 @@ def get_file_base64(data, is_pdf=False):
                     dec = base64.b64decode(b64, validate=False)
                     mt = "application/pdf" if is_pdf or dec[:4]==b'%PDF' else "image/jpeg"
                     return b64, mt
-        except Exception as e:
-            print(f"[M1] err {e}")
+        except Exception as e: print(f"[M1] err {e}")
         if attempt < 4: time.sleep(8)
     return None, None
 
@@ -89,7 +88,6 @@ def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
         body = {"contents": [{"role": "user", "parts": parts}], "generationConfig": {"temperature": 0.3}}
         try:
             r = requests.post(url, json=body, headers=headers, timeout=90)
-            print(f"TRY {model} -> {r.status_code}")
             if r.status_code == 200:
                 return r.json()["candidates"][0]["content"]["parts"][0]["text"], "ok"
             last_error = r.text[:800]
@@ -113,10 +111,57 @@ def webhook():
     msg = data.get("message", {})
     jid = key.get("remoteJid")
     push_name = data.get("pushName") or ""
+    participant = key.get("participant") or data.get("participant") or ""
     if not jid or key.get("fromMe"): return jsonify({"ok": True}), 200
 
     is_group = "@g.us" in jid
     text = msg.get("conversation") or msg.get("extendedTextMessage", {}).get("text") or ""
+    if not text and "imageMessage" in msg:
+        text = msg["imageMessage"].get("caption") or ""
+
+    # ===== 老師驗證：只有 66838738371 =====
+    def is_teacher_user():
+        # 群組：睇 participant，私聊：睇 remoteJid
+        check_id = participant if is_group else jid
+        for tid in TEACHER_JIDS:
+            if tid in check_id:
+                return True
+        return False
+
+    # ===== 課堂鎖邏輯 =====
+    if is_group:
+        if jid not in GROUP_STATE:
+            GROUP_STATE[jid] = False
+
+        low = text.lower().strip()
+
+        # 老師開關指令
+        if any(k in text for k in ["開放提問", "開放發問", "/open", "開始發問", "開放功課"]) or low == "open":
+            if is_teacher_user():
+                GROUP_STATE[jid] = True
+                send_text(jid, f"✅ 老師已開放提問，依家同學可以問 LC Sir 喇！\n打法：LC 幫我睇下呢題")
+            else:
+                send_text(jid, "⛔ 只有老師 (+66 83 738 371) 先可以開放提問呀～")
+            return jsonify({"ok": True}), 200
+        
+        if any(k in text for k in ["關閉提問", "關閉發問", "/close", "停止發問", "收工"]) or low == "close":
+            if is_teacher_user():
+                GROUP_STATE[jid] = False
+                send_text(jid, "🔒 老師已關閉提問，LC Sir 休息中。")
+            else:
+                send_text(jid, "⛔ 只有老師先可以關閉提問呀～")
+            return jsonify({"ok": True}), 200
+
+        # 鎖住時擋學生
+        if not GROUP_STATE[jid]:
+            if any(k in low for k in ["lc", "阿sir", "阿 sir", "sir", "老師"]) or "imageMessage" in msg or "documentMessage" in msg:
+                if is_teacher_user():
+                    pass # 老師自己問唔擋
+                else:
+                    if any(k in low for k in ["lc", "sir", "老師"]):
+                        send_text(jid, "⏳ 而家未開放提問，等老師講「開放提問」先可以問 LC Sir 呀～")
+                    return jsonify({"ok": True}), 200
+
     if is_group:
         low = text.lower()
         if not any(k in low for k in ["lc", "阿sir", "阿 sir", "sir", "老師"]) and "imageMessage" not in msg and "documentMessage" not in msg:
@@ -158,7 +203,7 @@ def webhook():
 
 @app.route("/", methods=["GET"])
 def home():
-    return f"LC Sir LIGHT v8 Visual-Link len={len(GEMINI_API_KEY)}", 200
+    return f"LC Sir LIGHT v10 Teacher-Lock len={len(GEMINI_API_KEY)}", 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
