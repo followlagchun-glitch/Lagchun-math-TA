@@ -141,7 +141,7 @@ def webhook():
                 GROUP_STATE[jid] = True
                 send_text(jid, f"✅ 老師已開放提問，依家同學可以問 LC Sir 喇！\n打法：LC 幫我睇下呢題")
             else:
-                send_text(jid, "⛔ 只有老師 (+66 83 738 371) 先可以開放提問呀～")
+                send_text(jid, "⛔ 只有老師 (+66 83 873 8371) 先可以開放提問呀～")
             return jsonify({"ok": True}), 200
         
         if any(k in text for k in ["關閉提問", "關閉發問", "/close", "停止發問", "收工"]) or low == "close":
