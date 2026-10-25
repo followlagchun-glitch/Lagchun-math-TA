@@ -33,49 +33,58 @@ CROSS = "\u274c"
 LOCK_ICON = "\U0001f512"
 HOURGLASS = "\u23f3"
 
-print(f"BOOT ULTIMATE HUMANIZED len={len(GEMINI_API_KEY)} state={GROUP_STATE}")
+print(f"BOOT ULTIMATE DSE PRO len={len(GEMINI_API_KEY)} state={GROUP_STATE}")
 
-# === 結合你的人性化版本 + 新功能 ===
-SYSTEM_PROMPT = f"""You are LC Sir, Hong Kong DSE Math tutor. Friendly, simple, short, like a real person, HK Cantonese.
+SYSTEM_PROMPT = f"""You are LC Sir, Hong Kong DSE Math 專家，多年DSE經驗，團隊係 LC Math。Friendly, HK Cantonese, 但要非常專業。
 
 NEVER LATEX - VERY STRICT:
-- NEVER use $ $ or $$ $$ or \\( \\) or \\[ \\]
-- NEVER use \\frac \\text \\sqrt \\^ 
+- NEVER use $ $ or $$ $$ or \\( \\) or \\[ \\] or \\frac \\text \\sqrt
 - Use pretty Unicode ONLY: ² ³ √ ½ ¼ ¾ × ÷
-- Fraction use (a/b) or ½, power use ², sqrt use √91
-- y = (x+9)/2, NOT y = \\frac{{x+9}}{{2}}
+- y = (x+9)/2
 
-LANGUAGE - VERY STRICT:
-- MUST use Traditional Chinese ONLY (繁體中文)
-- MUST use HK Cantonese口語: 係, 唔係, 睇下, 呢度
-- NEVER use Simplified Chinese
+LANGUAGE:
+- MUST Traditional Chinese ONLY (繁體), HK Cantonese
 
-OUTPUT FORMAT - 人性化改卷模式:
-如果全對：
+你係DSE專家，必須分兩個模式：
+
+模式A - 問問題模式 (只有題目，冇手寫答案) - 唔講啱錯，專業拆解：
+格式：
+*題目拆解*：呢條係DSE咩課題？咩卷型？
+*DSE概念*：考咩 Concept？例如 排列組合要分清楚有冇次序
+*技巧*：DSE常用技巧，例如 分母係咩、分子係咩，C同P嘅分別
+*點做*：
+1. ...
+2. ...
+*答案*：C (1/3)
+💡 DSE伏位：DSE成日喺呢度設伏...
+
+模式B - 改功課模式 (有學生手寫) - 專業DSE角度評核：
+格式：
 ---
-*Q1* {TICK} 全對！做得好靚，繼續保持！
-
-如果有錯，每題都要講啱乜錯乜：
----
-*Q1*
+*Q1* {CROSS} 呢題肯定唔啱，DSE會0分喎！
+{DSE課題}：排列組合 / 概率
 {TICK} 啱嘅地方：
-- 步驟清晰，公式用啱
-
+- 概念用啱，識用 C
 {CROSS} 錯 / 漏嘅地方：
-- 第二行 -2y 抄錯做 +2y
+- DSE計錯總數，漏咗考慮...
+💬 DSE評語：以DSE marking嚟講，呢步...
+💡 應該點寫：總共有 3種分法 = 3!/2! = 3
+💡 DSE概念重溫：呢題考緊「相同物件分唔同人」
 
-💬 Comment：一句人性化鼓勵
-💡 應該點寫：h² = 100 - 9 = 91，h = √91
-
-如果有直線，必須加：
-GRAPH_EQUATION: x-2y+9=0
+*Q2* {TICK} 呢題啱晒！DSE滿分Level！
+{TICK} 啱嘅地方：
+- 技巧好純熟
 
 最後加：
-ANNOTATIONS_JSON: [{{"x":0.5,"y":0.3}}] 錯題嘅大概位置
-最後 💡 總結 2行人性化總結
+GRAPH_EQUATION: x-2y+9=0
+ANNOTATIONS_JSON: [{{"x":0.5,"y":0.3}}]
+最後 💡 DSE總結：2行，講佢整體DSE水平同要點改善
+
+判斷：有手寫=模式B，冇=模式A
+CRITICAL: 專業DSE角度，唔好再對純問題講錯嘅地方！
 """
 
-MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash"]
+MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash", "gemini-3.5-flash-lite"]
 
 def clean_b64(b64):
     if not b64: return None
@@ -111,7 +120,7 @@ def get_file_base64(data, is_pdf=False):
     return None, None
 
 def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
-    prompt=SYSTEM_PROMPT+f"\n\n學生功課: {question}\n記得：逐題講做得啱同唔啱，繁體廣東話，人性化啲，唔好用LaTeX"
+    prompt=SYSTEM_PROMPT+f"\n\n學生: {question}\n記得：你係DSE專家，分清問問題定改功課"
     last_error=""
     for model in MODELS:
         url=f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -123,12 +132,11 @@ def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
             r=requests.post(url, json=body, headers=headers, timeout=120)
             if r.status_code==200:
                 txt=r.json()["candidates"][0]["content"]["parts"][0]["text"]
-                # 二次保險：簡轉繁
-                txt=txt.replace("对","對").replace("错","錯").replace("做得对","做得啱")
+                txt=txt.replace("对","對").replace("错","錯")
                 return txt, "ok"
             last_error=r.text[:800]
         except Exception as e: last_error=str(e)
-    return f"{CROSS} 暫時連唔到 Gemini，稍後再試: {last_error[:200]}", "error"
+    return f"{CROSS} 暫時連唔到，稍後再試", "error"
 
 def send_typing(jid, stop_event):
     url = f"{EVOLUTION_API_URL}/chat/sendPresence/{EVOLUTION_INSTANCE}"
@@ -145,7 +153,6 @@ def send_text(jid, text):
     url=f"{EVOLUTION_API_URL}/message/sendText/{EVOLUTION_INSTANCE}"
     headers={"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
     try:
-        # 清理殘留 LaTeX 保險
         text = re.sub(r"\$+.*?\$+", "", text)
         text = re.sub(r"\\frac\{.*?\}\{.*?\}", "(a/b)", text)
         text = re.sub(r"\\[a-zA-Z]+", "", text)
@@ -234,7 +241,6 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
         for k in list(SEEN_IDS.keys()):
             if now - SEEN_IDS[k] > 300: del SEEN_IDS[k]
         if msg_id in SEEN_IDS:
-            print(f"[SKIP DUP] {msg_id}")
             return
         SEEN_IDS[msg_id]=now
 
@@ -326,14 +332,12 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
     
     send_text(jid, clean_answer)
 
-    # 紅圈功能 - 有錯先圈
     if b64 and mime!="application/pdf" and CROSS in clean_answer:
         img_b64=create_annotated_image(b64, annotations)
         if img_b64:
             time.sleep(0.6)
             send_image(jid, img_b64, f"{CROSS} 睇圖，紅圈就係錯嘅位")
 
-    # 合併圖功能
     if graphs:
         clean_graphs=[]
         seen=set()
@@ -348,7 +352,6 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
             if path:
                 time.sleep(0.5)
                 send_image(jid, path, f"📊 合併圖: {', '.join(clean_graphs)}")
-                # Desmos link
                 expr_list=[{"latex": e, "color": "#c82a54" if i==0 else "#2d70b3"} for i,e in enumerate(clean_graphs)]
                 desmos_url=f"https://www.desmos.com/calculator?expressions_list={urllib.parse.quote(json.dumps(expr_list))}"
                 send_text(jid, f"互動版睇圖:\n{desmos_url}")
@@ -367,12 +370,11 @@ def webhook():
     text=msg.get("conversation") or msg.get("extendedTextMessage", {}).get("text") or ""
     if not text and "imageMessage" in msg: text=msg["imageMessage"].get("caption") or ""
     msg_id = key.get("id") or str(data.get("id") or "") or f"no-id-{int(time.time()*1000)}"
-    print(f"[IN] id={msg_id} fromMe={from_me} jid={jid} text={text[:80]}")
     threading.Thread(target=do_work, args=(jid, text, push_name, participant, from_me, msg, data, msg_id), daemon=True).start()
     return jsonify({"ok": True}), 200
 
 @app.route("/", methods=["GET"])
-def home(): return f"LC Sir ULTIMATE HUMANIZED {TICK}{CROSS} len={len(GEMINI_API_KEY)}", 200
+def home(): return f"LC Sir ULTIMATE DSE PRO {TICK}{CROSS} len={len(GEMINI_API_KEY)}", 200
 @app.route("/health", methods=["GET"])
 def health(): return "ok", 200
 if __name__=="__main__":
