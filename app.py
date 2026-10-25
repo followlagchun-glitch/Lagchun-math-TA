@@ -1,13 +1,34 @@
 from flask import Flask, request, jsonify
-import os, requests, re, urllib.parse, base64, time
+import os, requests, re, urllib.parse, base64, time, json
 app = Flask(__name__)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "").strip().rstrip("/")
 EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
 TEACHER_NUMBERS = ["85246447827", "66838738371"]
-print(f"BOOT FIX_FROMME FINAL len={len(GEMINI_API_KEY)}")
-GROUP_STATE = {}
+
+# === 新增：持久化 ===
+STATE_FILE = "/tmp/group_state.json"
+def load_state():
+    try:
+        if os.path.exists(STATE_FILE):
+            with open(STATE_FILE, "r") as f:
+                data = json.load(f)
+                print(f"[LOAD_STATE] {data}")
+                return data
+    except Exception as e: print(f"[LOAD_STATE] err {e}")
+    return {}
+
+def save_state():
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump(GROUP_STATE, f)
+        print(f"[SAVE_STATE] {GROUP_STATE}")
+    except Exception as e: print(f"[SAVE_STATE] err {e}")
+
+GROUP_STATE = load_state()
+print(f"BOOT FIX_FROMME FINAL PERSIST len={len(GEMINI_API_KEY)} state={GROUP_STATE}")
+
 SYSTEM_PROMPT = """You are LC Sir, Hong Kong DSE Math tutor. Friendly, simple, short, like a real person.
 CRITICAL RULES:
 - NEVER use $ $ or \\frac \\text or ^ or sqrt().
@@ -101,10 +122,12 @@ def webhook():
         if any(k in text for k in ["開放提問","開放發問","/open","開始發問","開放功課"]) or low=="open":
             print(f"[OPEN] is_teacher={is_teacher_user()} from_me={from_me}")
             GROUP_STATE[jid]=True
-            send_text(jid, f"✅ 老師已開放提問，依家同學可以問 LC Sir 喇！\n打法：LC 幫我睇下呢題")
+            save_state()
+            send_text(jid, f"✅ 老師已開放提問，依家同學可以問 LC Sir 喇！\n(會一直開放，直到老師打「關閉提問」先會關)\n打法：LC 幫我睇下呢題")
             return jsonify({"ok": True}), 200
         if any(k in text for k in ["關閉提問","關閉發問","/close","停止發問","收工"]) or low=="close":
             GROUP_STATE[jid]=False
+            save_state()
             send_text(jid, "🔒 老師已關閉提問，LC Sir 休息中。")
             return jsonify({"ok": True}), 200
         if not GROUP_STATE[jid]:
@@ -157,6 +180,6 @@ def webhook():
 
 @app.route("/", methods=["GET"])
 def home():
-    return f"LC Sir FINAL FIX_FROMME len={len(GEMINI_API_KEY)}", 200
+    return f"LC Sir FINAL PERSIST len={len(GEMINI_API_KEY)} state={GROUP_STATE}", 200
 if __name__=="__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
