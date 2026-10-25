@@ -20,19 +20,18 @@ def save_state():
 GROUP_STATE = load_state()
 SEEN_IDS = {}
 LOCK = threading.Lock()
-print(f"BOOT FINAL 4-IN-1 SYMPY len={len(GEMINI_API_KEY)}")
-SYSTEM_PROMPT = """You are LC Sir, Hong Kong DSE Math tutor. Friendly, simple, short, like a real person，interesting and funny guy 
+print(f"BOOT FINAL 5-IN-1 AUTO-GRAPH len={len(GEMINI_API_KEY)}")
+SYSTEM_PROMPT = """You are LC Sir, Hong Kong DSE Math tutor. Friendly, simple, short, like a real person who is funny , humour and interesting.
 CRITICAL RULES:
 - NEVER use $ $ or \\frac \\text or ^ or sqrt().
 - MUST use pretty Unicode math only: 次方用 ² ³，開方用 √，分數用 ½ ¼ ¾ 或 ⁄，乘除用 × ÷
 - Use *bold* for Q titles, short lines, HK Cantonese口語.
 - No LaTeX ever.
-- 如果題目有 L: x-2y+9=0 或 3x+y-8=0 呢啲直線，一定要出 GRAPH_EQUATION: x-2y+9=0 同 GRAPH_EQUATION: 3x+y-8=0，方便學生對照。
 OUTPUT FORMAT - PDF功課改卷模式:
-如果全對：--- *Q1* ✅ 全對！
-如果有錯：--- *Q1* ✅ 啱嘅地方：- ... ❌ 錯 / 漏嘅地方：- ... 💬 Comment：一句講整體 💡 應該點寫：h² = 100 - 9 = 91，h = √91 GRAPH_EQUATION: 如果有圖就加 y = ... 最後 💡 總結 2行 最後一定要加 ANNOTATIONS_JSON: [{"label":"3²計錯","x":0.5,"y":0.4}] x,y係0-1座標。全對就 []
+如果全對：--- *Q1* ✅ 全對！做得好靚，繼續保持！
+如果有錯：--- *Q1* ✅ 啱嘅地方：- ... ❌ 錯 / 漏嘅地方：- ... 💬 Comment：一句講整體 💡 應該點寫：h² = 100 - 9 = 91，h = √91 GRAPH_EQUATION: 如果題目有直線 L: x-2y+9=0 或 3x+y-8=0，一定要輸出 GRAPH_EQUATION: x-2y+9=0 和 GRAPH_EQUATION: 3x+y-8=0 最後 💡 總結 2行 最後一定要加 ANNOTATIONS_JSON: [{"label":"3²計錯","x":0.5,"y":0.4}] x,y係0-1座標。全對就 []
 """
-MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.5-flash-lite"]
+MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-3.5-flash-lite"]
 def clean_b64(b64):
     if not b64: return None
     b64=b64.strip()
@@ -162,7 +161,6 @@ def download_graph_from_api(equation_str, out_path="/tmp/graph.jpg"):
                     sol = sp.solve(expr, y)
                     if sol:
                         y_expr = sol[0]
-                        print(f"[GRAPH] solved {eq_raw_clean} -> y={y_expr}")
                         for xv in np.linspace(-10, 10, 200):
                             try:
                                 yv = float(y_expr.subs(x, xv))
@@ -186,7 +184,7 @@ def download_graph_from_api(equation_str, out_path="/tmp/graph.jpg"):
         r = requests.get(url, timeout=25)
         if r.status_code == 200 and len(r.content) > 3000:
             with open(out_path, "wb") as f: f.write(r.content)
-            print(f"[GRAPH DL OK] {eq_raw_clean}"); return out_path
+            return out_path
     except Exception as e: print(f"[GRAPH DL ERR] {e} eq={equation_str}")
     return None
 def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
@@ -194,7 +192,7 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
         now=time.time()
         for k in list(SEEN_IDS.keys()):
             if now - SEEN_IDS[k] > 300: del SEEN_IDS[k]
-        if msg_id in SEEN_IDS: print(f"[SKIP AUTO-DUP] {msg_id}"); return
+        if msg_id in SEEN_IDS: return
         SEEN_IDS[msg_id]=now
     stop_typing = threading.Event()
     threading.Thread(target=send_typing, args=(jid, stop_typing), daemon=True).start()
@@ -210,7 +208,7 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
         close_keys = ["關閉提問","關閉發問","結束提問","結束發問","/close","停止發問","收工","關閉","結束"]
         if any(k in text for k in open_keys) or low in ["open","開始","開放"]:
             if not is_teacher_user(): stop_typing.set(); return
-            GROUP_STATE[jid]=True; save_state(); stop_typing.set(); send_text(jid, "✅ 老師已開放提問！依家同學可以問 LC Sir 喇～\n👉 打法：LC 幫我睇下呢題 + 相"); return
+            GROUP_STATE[jid]=True; save_state(); stop_typing.set(); send_text(jid, "✅ 老師已開放提問！依家同學可以問 LC Sir 喇～"); return
         if any(k in text for k in close_keys) or low in ["close","關閉","結束"]:
             if not is_teacher_user(): stop_typing.set(); return
             GROUP_STATE[jid]=False; save_state(); stop_typing.set(); send_text(jid, "🔒 老師已關閉提問，LC Sir 休息中～"); return
@@ -242,17 +240,21 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
     if m_ann:
         try: annotations = json.loads(m_ann.group(1))
         except: pass
-    graphs=re.findall(r"GRAPH_EQUATION:\s*(.+)", answer)
-# Fallback: 如果 Gemini 唔出圖，但題目本身有直線，就自動畫
-if not graphs:
-    found = re.findall(r'[0-9]*x\s*[\+\-]\s*[0-9]*y\s*[\+\-]\s*[0-9]+\s*=\s*0', text + " " + answer)
-    # 去重
-    seen=set()
-    for f in found:
-        ff=f.replace(" ","")
-        if ff not in seen:
-            seen.add(ff)
-            graphs.append(f)
+    graphs = re.findall(r"GRAPH_EQUATION:\s*(.+)", answer)
+    # Fallback auto-detect
+    if not graphs:
+        combined = text + " " + answer
+        found = re.findall(r'x\s*[\+\-]\s*\d*y\s*[\+\-]\s*\d+\s*=\s*0|\d*x\s*[\+\-]\s*y\s*[\+\-]\s*\d+\s*=\s*0', combined)
+        seen=set()
+        for f in found:
+            ff=f.replace(" ","")
+            if ff not in seen:
+                seen.add(ff)
+                graphs.append(f)
+        # 額外抓 x-2y+9=0 呢類
+        extra = re.findall(r'x\s*-\s*2y\s*\+\s*9\s*=\s*0|3x\s*\+\s*y\s*-\s*8\s*=\s*0', combined)
+        for f in extra:
+            if f not in graphs: graphs.append(f)
     clean_answer=re.sub(r"GRAPH_EQUATION:\s*.+", "", answer).strip()
     clean_answer=re.sub(r"ANNOTATIONS_JSON:.*", "", clean_answer, flags=re.DOTALL).strip()
     if is_group and push_name: clean_answer=f"@{push_name} {clean_answer}"
@@ -281,7 +283,7 @@ def webhook():
     threading.Thread(target=do_work, args=(jid, text, push_name, participant, from_me, msg, data, msg_id), daemon=True).start()
     return jsonify({"ok": True}), 200
 @app.route("/", methods=["GET"])
-def home(): return f"LC Sir 3-IN-1 len={len(GEMINI_API_KEY)}", 200
+def home(): return f"LC Sir 5-IN-1 len={len(GEMINI_API_KEY)}", 200
 @app.route("/health", methods=["GET"])
 def health(): return "ok", 200
 if __name__=="__main__": app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
