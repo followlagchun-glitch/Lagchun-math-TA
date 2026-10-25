@@ -12,7 +12,7 @@ STATE_FILE = "/tmp/group_state.json"
 
 def load_state():
     try:
-        if os.path.exists(STATE_FILE)：
+        if os.path.exists(STATE_FILE):
             with open(STATE_FILE, "r") as f:
                 return json.load(f)
     except:
