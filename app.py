@@ -20,8 +20,8 @@ def save_state():
 GROUP_STATE = load_state()
 SEEN_IDS = {}
 LOCK = threading.Lock()
-print(f"BOOT FINAL 5-IN-1 AUTO-GRAPH len={len(GEMINI_API_KEY)}")
-SYSTEM_PROMPT = """You are LC Sir, Hong Kong DSE Math tutor. Friendly, simple, short, like a real person who is funny , humour and interesting.
+print(f"BOOT FINAL 6-IN-1 COMBINED len={len(GEMINI_API_KEY)}")
+SYSTEM_PROMPT = """You are LC Sir, Hong Kong DSE Math tutor. Friendly, simple, short, like a real person.
 CRITICAL RULES:
 - NEVER use $ $ or \\frac \\text or ^ or sqrt().
 - MUST use pretty Unicode math only: 次方用 ² ³，開方用 √，分數用 ½ ¼ ¾ 或 ⁄，乘除用 × ÷
@@ -142,58 +142,65 @@ def download_graph_from_api(equation_str, out_path="/tmp/graph.jpg"):
         import numpy as np, sympy as sp
         eq_raw_clean = equation_str.strip().replace("圖像","").strip()
         points = []
-        circ_match = re.search(r'\(x\s*([+-]\s*\d*\.?\d+)?\)\s*\^?2?²?\s*\+\s*\(y\s*([+-]\s*\d*\.?\d+)?\)\s*\^?2?²?\s*=\s*(\d+\.?\d*)', eq_raw_clean.replace(" ", ""))
-        if circ_match:
-            try:
-                h_str = (circ_match.group(1) or "0").replace(" ", ""); k_str = (circ_match.group(2) or "0").replace(" ", "")
-                h = -float(h_str) if h_str else 0; k = -float(k_str) if k_str else 0
-                r_val = float(circ_match.group(3))**0.5
-                for th in np.linspace(0, 2*np.pi, 150):
-                    points.append({"x": float(h + r_val*np.cos(th)), "y": float(k + r_val*np.sin(th))})
-            except: points = []
+        print(f"[GRAPH] try {eq_raw_clean}")
+        try:
+            eq_for_sym = eq_raw_clean.replace("²","**2").replace("³","**3").replace("^","**")
+            x, y = sp.symbols('x y')
+            if "=" in eq_for_sym:
+                left, right = eq_for_sym.split("=",1)
+                expr = sp.sympify(left) - sp.sympify(right)
+                sol = sp.solve(expr, y)
+                if sol:
+                    y_expr = sol[0]
+                    for xv in np.linspace(-10, 10, 300):
+                        try:
+                            yv = float(y_expr.subs(x, xv))
+                            if abs(yv) < 15:
+                                points.append({"x": float(xv), "y": float(yv)})
+                        except: pass
+        except Exception as e:
+            print(f"[GRAPH SYMPY ERR] {e}")
         if not points:
-            try:
-                eq_for_sym = eq_raw_clean.replace("²","**2").replace("³","**3").replace("^","**")
-                x, y = sp.symbols('x y')
-                if "=" in eq_for_sym:
-                    left, right = eq_for_sym.split("=", 1)
-                    expr = sp.sympify(left) - sp.sympify(right)
-                    sol = sp.solve(expr, y)
-                    if sol:
-                        y_expr = sol[0]
-                        for xv in np.linspace(-10, 10, 200):
-                            try:
-                                yv = float(y_expr.subs(x, xv))
-                                if abs(yv) < 100: points.append({"x": float(xv), "y": yv})
-                            except: pass
-            except Exception as e: print(f"[GRAPH SYMPY ERR] {e}")
-        if not points:
-            try:
-                eq = eq_raw_clean.replace("y=","").replace("y =","").strip()
-                eq_py = eq.replace("^","**").replace("²","**2").replace("³","**3")
-                for xv in np.linspace(-10, 10, 200):
-                    try:
-                        yv = eval(eq_py, {"x": float(xv), "np": np, "sin": np.sin, "cos": np.cos, "sqrt": np.sqrt, "log": np.log, "exp": np.exp, "tan": np.tan})
-                        if yv is not None and abs(float(yv)) < 100: points.append({"x": float(xv), "y": float(yv)})
-                    except: pass
-            except: pass
-        if not points:
-            print(f"[GRAPH] no points for {eq_raw_clean}"); return None
-        chart_config = {"type": "scatter","data": {"datasets": [{"label": eq_raw_clean, "data": points, "showLine": True, "fill": False, "borderColor": "#e11d48", "backgroundColor": "#e11d48", "pointRadius": 0, "borderWidth": 3}]},"options": {"title": {"display": True, "text": eq_raw_clean, "fontSize": 16},"scales": {"x": {"type": "linear", "position": "bottom"}, "y": {}},"legend": {"display": False}}}
-        url = f"https://quickchart.io/chart?c={urllib.parse.quote(json.dumps(chart_config))}&width=700&height=500&backgroundColor=white&devicePixelRatio=2"
+            print(f"[GRAPH] no points for {eq_raw_clean}")
+            return None
+        chart_config = {
+            "type": "scatter",
+            "data": {
+                "datasets": [{
+                    "label": eq_raw_clean,
+                    "data": points,
+                    "showLine": True,
+                    "fill": False,
+                    "borderColor": "rgb(225,29,72)",
+                    "backgroundColor": "rgb(225,29,72)",
+                    "borderWidth": 4,
+                    "pointRadius": 0,
+                    "lineTension": 0
+                }]
+            },
+            "options": {
+                "title": {"display": True, "text": eq_raw_clean, "fontSize": 18},
+                "legend": {"display": False},
+                "scales": {
+                    "xAxes": [{"type": "linear", "position": "bottom", "ticks": {"min": -10, "max": 10}, "gridLines": {"color": "#ddd"}}],
+                    "yAxes": [{"ticks": {"min": -10, "max": 10}, "gridLines": {"color": "#ddd"}}]
+                }
+            }
+        }
+        url = f"https://quickchart.io/chart?c={urllib.parse.quote(json.dumps(chart_config))}&width=700&height=550&backgroundColor=white&devicePixelRatio=2&format=jpg"
         r = requests.get(url, timeout=25)
         if r.status_code == 200 and len(r.content) > 3000:
             with open(out_path, "wb") as f: f.write(r.content)
             return out_path
-    except Exception as e: print(f"[GRAPH DL ERR] {e} eq={equation_str}")
+    except Exception as e:
+        print(f"[GRAPH DL ERR] {e} eq={equation_str}")
     return None
-    def download_combined_graph(equations_list, out_path="/tmp/combined.jpg"):
+def download_combined_graph(equations_list, out_path="/tmp/combined.jpg"):
     try:
-        import numpy as np, sympy as sp, json, urllib.parse, requests
+        import numpy as np, sympy as sp
         colors = ["rgb(225,29,72)", "rgb(45,112,179)", "rgb(22,163,74)", "rgb(234,179,8)", "rgb(147,51,234)"]
         datasets = []
         print(f"[COMBINED] try {equations_list}")
-
         for idx, eq_raw_clean in enumerate(equations_list):
             points = []
             try:
@@ -212,8 +219,7 @@ def download_graph_from_api(equation_str, out_path="/tmp/graph.jpg"):
                                     points.append({"x": float(xv), "y": float(yv)})
                             except: pass
             except Exception as e:
-                print(f"[COMBINED SYMPY ERR] {e} for {eq_raw_clean}")
-            
+                print(f"[COMBINED SYMPY ERR] {e}")
             if points:
                 datasets.append({
                     "label": eq_raw_clean,
@@ -226,10 +232,8 @@ def download_graph_from_api(equation_str, out_path="/tmp/graph.jpg"):
                     "pointRadius": 0,
                     "lineTension": 0
                 })
-
         if not datasets:
             return None
-
         chart_config = {
             "type": "scatter",
             "data": {"datasets": datasets},
@@ -237,18 +241,16 @@ def download_graph_from_api(equation_str, out_path="/tmp/graph.jpg"):
                 "title": {"display": True, "text": " + ".join(equations_list)[:80], "fontSize": 16},
                 "legend": {"display": True, "position": "bottom"},
                 "scales": {
-                    "xAxes": [{"type": "linear", "position": "bottom", "ticks": {"min": -10, "max": 10, "stepSize": 1}, "gridLines": {"color": "#ddd"}}],
-                    "yAxes": [{"ticks": {"min": -10, "max": 10, "stepSize": 1}, "gridLines": {"color": "#ddd"}}]
+                    "xAxes": [{"type": "linear", "position": "bottom", "ticks": {"min": -10, "max": 10}, "gridLines": {"color": "#ddd"}}],
+                    "yAxes": [{"ticks": {"min": -10, "max": 10}, "gridLines": {"color": "#ddd"}}]
                 }
             }
         }
-
         url = f"https://quickchart.io/chart?c={urllib.parse.quote(json.dumps(chart_config))}&width=800&height=600&backgroundColor=white&devicePixelRatio=2&format=jpg"
         r = requests.get(url, timeout=25)
         print(f"[COMBINED] status={r.status_code} len={len(r.content)}")
         if r.status_code == 200 and len(r.content) > 4000:
-            with open(out_path, "wb") as f:
-                f.write(r.content)
+            with open(out_path, "wb") as f: f.write(r.content)
             return out_path
     except Exception as e:
         print(f"[COMBINED ERR] {e}")
@@ -307,7 +309,6 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
         try: annotations = json.loads(m_ann.group(1))
         except: pass
     graphs = re.findall(r"GRAPH_EQUATION:\s*(.+)", answer)
-    # Fallback auto-detect
     if not graphs:
         combined = text + " " + answer
         found = re.findall(r'x\s*[\+\-]\s*\d*y\s*[\+\-]\s*\d+\s*=\s*0|\d*x\s*[\+\-]\s*y\s*[\+\-]\s*\d+\s*=\s*0', combined)
@@ -317,7 +318,6 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
             if ff not in seen:
                 seen.add(ff)
                 graphs.append(f)
-        # 額外抓 x-2y+9=0 呢類
         extra = re.findall(r'x\s*-\s*2y\s*\+\s*9\s*=\s*0|3x\s*\+\s*y\s*-\s*8\s*=\s*0', combined)
         for f in extra:
             if f not in graphs: graphs.append(f)
@@ -340,34 +340,27 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
             if k not in seen_eq:
                 seen_eq.add(k)
                 clean_graphs.append(eq)
-
         if clean_graphs:
-            # 如果多過1條，就畫1張合併圖
             if len(clean_graphs) > 1:
                 combined_path = download_combined_graph(clean_graphs, out_path="/tmp/combined.jpg")
                 if combined_path:
-                    send_image(jid, combined_path, f"📊 合併圖：{' , '.join(clean_graphs)}")
+                    send_image(jid, combined_path, f"📊 合併圖：{', '.join(clean_graphs)}")
                     time.sleep(0.4)
             else:
-                # 1條就照舊
                 g_path = download_graph_from_api(clean_graphs[0], out_path="/tmp/graph_0.jpg")
                 if g_path:
                     send_image(jid, g_path, f"📊 {clean_graphs[0]} 圖像")
                     time.sleep(0.4)
-
-            # 互動 link 都係合併 1 個
-            import json as _json
-            expr_list = [{"latex": e, "color": "#c82a54" if i==0 else "#2d70b3" if i==1 else "#16a34a" if i==2 else "#000"} for i,e in enumerate(clean_graphs)]
-            desmos_url = f"https://www.desmos.com/calculator?expressions_list={urllib.parse.quote(_json.dumps(expr_list))}"
+            expr_list = [{"latex": e, "color": "#c82a54" if i==0 else "#2d70b3" if i==1 else "#16a34a"} for i,e in enumerate(clean_graphs)]
+            desmos_url = f"https://www.desmos.com/calculator?expressions_list={urllib.parse.quote(json.dumps(expr_list))}"
             geogebra_combined = "; ".join(clean_graphs)
             geogebra_url = f"https://www.geogebra.org/graphing?lang=en&command={urllib.parse.quote(geogebra_combined)}"
-
             txt = f"📊 互動版 (已合併 {len(clean_graphs)} 條線)\n"
             for e in clean_graphs:
                 txt += f"• {e}\n"
-            txt += f"\n👉 Desmos 一次睇晒: {desmos_url}\n"
-            txt += f"👉 GeoGebra 一次睇晒: {geogebra_url}"
+            txt += f"\n👉 Desmos 一次睇晒: {desmos_url}\n👉 GeoGebra 一次睇晒: {geogebra_url}"
             send_text(jid, txt)
+@app.route("/webhook", methods=["POST"])
 def webhook():
     body=request.json or {}; data=body.get("data", {}); key=data.get("key", {}); msg=data.get("message", {}); jid=key.get("remoteJid"); push_name=data.get("pushName") or ""; participant=key.get("participant") or data.get("participant") or ""; from_me=key.get("fromMe", False)
     if not jid: return jsonify({"ok": True}), 200
@@ -378,7 +371,7 @@ def webhook():
     threading.Thread(target=do_work, args=(jid, text, push_name, participant, from_me, msg, data, msg_id), daemon=True).start()
     return jsonify({"ok": True}), 200
 @app.route("/", methods=["GET"])
-def home(): return f"LC Sir 5-IN-1 len={len(GEMINI_API_KEY)}", 200
+def home(): return f"LC Sir 6-IN-1 len={len(GEMINI_API_KEY)}", 200
 @app.route("/health", methods=["GET"])
 def health(): return "ok", 200
 if __name__=="__main__": app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
