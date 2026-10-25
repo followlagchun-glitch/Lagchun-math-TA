@@ -26,7 +26,7 @@ GROUP_STATE = load_state()
 SEEN_IDS = {}
 LOCK = threading.Lock()
 
-print(f"BOOT NO-AUTO-DUP len={len(GEMINI_API_KEY)} state={GROUP_STATE}")
+print(f"BOOT TYPING-FIX len={len(GEMINI_API_KEY)} state={GROUP_STATE}")
 
 SYSTEM_PROMPT = """You are LC Sir, Hong Kong DSE Math tutor. Friendly, simple, short, like a real person.
 CRITICAL RULES:
@@ -99,16 +99,20 @@ def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
             last_error=r.text[:800]
         except Exception as e: last_error=str(e)
     return f"Error: {last_error}", "error"
+
 def send_typing(jid, stop_event):
     url = f"{EVOLUTION_API_URL}/chat/sendPresence/{EVOLUTION_INSTANCE}"
     headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
     payload = {"number": jid, "presence": "composing"}
     while not stop_event.is_set():
-        try: requests.post(url, json=payload, headers=headers, timeout=10)
+        try: 
+            requests.post(url, json=payload, headers=headers, timeout=10)
         except: pass
-        for _ in range(40):
+        # 每2.5秒送一次 composing，先可以 keep住 typing...
+        for _ in range(25):
             if stop_event.is_set(): break
             time.sleep(0.1)
+
 def send_text(jid, text):
     url=f"{EVOLUTION_API_URL}/message/sendText/{EVOLUTION_INSTANCE}"
     headers={"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
@@ -119,7 +123,6 @@ def send_text(jid, text):
     except Exception as e: print(f"Send fail {e}")
 
 def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
-    # 只用 ID 去重，5分鐘內同一個 ID 先叫重覆
     with LOCK:
         now=time.time()
         for k in list(SEEN_IDS.keys()):
@@ -128,6 +131,11 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
             print(f"[SKIP AUTO-DUP] {msg_id}")
             return
         SEEN_IDS[msg_id]=now
+
+    # ===== 重點：typing 一入嚟就開始，唔係等 load 圖先 =====
+    stop_typing = threading.Event()
+    typing_thread = threading.Thread(target=send_typing, args=(jid, stop_typing), daemon=True)
+    typing_thread.start()
 
     def is_teacher_user():
         if from_me: return True
@@ -143,30 +151,41 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
         open_keys = ["開放提問","開放發問","開始發問","開始提問","開放功課","/open","開始"]
         close_keys = ["關閉提問","關閉發問","結束提問","結束發問","/close","停止發問","收工","關閉","結束"]
         if any(k in text for k in open_keys) or low in ["open","開始","開放"]:
-            if not is_teacher_user(): return
+            if not is_teacher_user(): 
+                stop_typing.set()
+                return
             GROUP_STATE[jid]=True; save_state()
+            stop_typing.set()
             send_text(jid, "✅ \n老師已開放提問！依家同學可以問 LC Sir 喇～\n👉 打法：LC 幫我睇下呢題 + 相\n(會一直開住，直到老師打「關閉提問」先關)")
             return
         if any(k in text for k in close_keys) or low in ["close","關閉","結束"]:
-            if not is_teacher_user(): return
+            if not is_teacher_user():
+                stop_typing.set()
+                return
             GROUP_STATE[jid]=False; save_state()
+            stop_typing.set()
             send_text(jid, "🔒 \n老師已關閉提問，LC Sir 休息中～")
             return
         if not GROUP_STATE[jid]:
             if any(k in low for k in ["lc","阿sir","阿 sir","sir","老師"]) or "imageMessage" in msg or "documentMessage" in msg:
                 if not is_teacher_user():
+                    stop_typing.set()
                     if any(k in low for k in ["lc","sir","老師"]):
                         send_text(jid, "⏳ 而家未開放提問，等老師講「開始提問」先可以問 LC Sir 呀～")
                     return
 
-    if from_me and not is_group: return
+    if from_me and not is_group:
+        stop_typing.set()
+        return
     if from_me and "@g.us" in jid:
         if not any(k in text for k in ["開放","開始","關閉","結束","/open","/close","open","close","lc","阿sir","老師"]):
+            stop_typing.set()
             return
     if "@g.us" in jid:
         low=text.lower()
         if not any(k in low for k in ["lc","阿sir","阿 sir","sir","老師"]) and "imageMessage" not in msg and "documentMessage" not in msg:
             if not msg.get("imageMessage", {}).get("caption"):
+                stop_typing.set()
                 return
         text=f"[{push_name} 問]: {text}"
 
@@ -179,14 +198,15 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
         b64,mime=get_file_base64(data, is_pdf=True)
         text=(text or "幫我睇下呢份PDF功課").strip()
         mime="application/pdf"
-    if not text and not b64: return
+    if not text and not b64:
+        stop_typing.set()
+        return
     if ("imageMessage" in msg or "documentMessage" in msg) and not b64:
+        stop_typing.set()
         send_text(jid, "張圖仲 load 緊，麻煩 send 多次新相，唔好 forward 舊相 🙏")
         return
 
-    stop_typing = threading.Event()
-    t = threading.Thread(target=send_typing, args=(jid, stop_typing), daemon=True)
-    t.start()
+    # 呢度唔使再開 typing，因為上面已經開咗
     answer,_=call_gemini(text, b64, mime)
     stop_typing.set()
 
@@ -219,12 +239,11 @@ def webhook():
     if not text and "imageMessage" in msg: text=msg["imageMessage"].get("caption") or ""
     msg_id = key.get("id") or str(data.get("id") or "") or f"no-id-{int(time.time()*1000)}"
     print(f"[IN] id={msg_id} fromMe={from_me} jid={jid} text={text[:80]}")
-    # 重點：即刻回 200，先做野，唔等 Gemini
     threading.Thread(target=do_work, args=(jid, text, push_name, participant, from_me, msg, data, msg_id), daemon=True).start()
     return jsonify({"ok": True}), 200
 
 @app.route("/", methods=["GET"])
-def home(): return f"LC Sir NO-AUTO-DUP len={len(GEMINI_API_KEY)}", 200
+def home(): return f"LC Sir TYPING len={len(GEMINI_API_KEY)}", 200
 @app.route("/health", methods=["GET"])
 def health(): return "ok", 200
 if __name__=="__main__":
