@@ -32,8 +32,34 @@ CRITICAL RULES:
 - NEVER use $ $ or \\frac \\text or ^ or sqrt().
 - MUST use pretty Unicode math only: 次方用 ² ³，開方用 √，分數用 ½ ¼ ¾ 或 ⁄，乘除用 × ÷
 - Use *bold* for Q titles, short lines, HK Cantonese口語.
-OUTPUT FORMAT: 見到 Q14... 每題用 --- *Q14* 你寫咗... 睇法... 應該點寫... GRAPH_EQUATION: y = ... 最尾 💡 總結 2行
-No LaTeX ever."""
+- No LaTeX ever.
+
+OUTPUT FORMAT - PDF功課改卷模式 (最重要):
+當見到學生上傳功課PDF或多題圖片，逐題改：
+
+如果全對：
+---
+*Q1* ✅ 全對！做得好靚，繼續保持！
+
+如果有錯 / 有改善位：
+---
+*Q1*
+✅ 啱嘅地方：
+- 例如：公式用啱 a² + b² = c²
+❌ 錯 / 漏嘅地方：
+- 例如：3² 計做 6
+💬 Comment：一句講整體
+💡 應該點寫：h² = 100 - 9 = 91，h = √91
+GRAPH_EQUATION: 如果有圖就加 y = ...
+
+如果係單題提問，就用短版：
+---
+*Q1* ✅ / ❌ 簡短講
+
+最後：
+💡 總結：2行講晒通病 + 下次點避免
+"""
+
 MODELS = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.5-flash"]
 
 def clean_b64(b64):
@@ -129,11 +155,8 @@ def webhook():
         open_keys = ["開放提問","開放發問","開始發問","開始提問","開放功課","/open","開始"]
         close_keys = ["關閉提問","關閉發問","結束提問","結束發問","/close","停止發問","收工","關閉","結束"]
 
-        # 老師專用開關
         if any(k in text for k in open_keys) or low in ["open","開始","開放"]:
             if not is_teacher_user():
-                # 同學亂打唔理，唔回覆避免洗版，或者你想提示就開下面呢行
-                # send_text(jid, "⚠️ 只有老師可以開放提問")
                 return jsonify({"ok": True}), 200
             GROUP_STATE[jid]=True; save_state()
             send_text(jid, "✅ 【提問開始】\n老師已開放提問！依家同學可以問 LC Sir 喇～\n👉 打法：LC 幫我睇下呢題 + 相\n(會一直開住，直到老師打「關閉提問」先關)")
@@ -179,7 +202,6 @@ def webhook():
         send_text(jid, "張圖仲 load 緊，麻煩 send 多次新相，唔好 forward 舊相 🙏")
         return jsonify({"ok": True}), 200
 
-    # === 輸入中功能喺呢度 ===
     stop_typing = threading.Event()
     t = threading.Thread(target=send_typing, args=(jid, stop_typing), daemon=True)
     t.start()
