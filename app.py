@@ -8,8 +8,8 @@ EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "").strip().rstrip("/")
 EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
 
-# 鎖死：你而家用緊 +85246447827 同埋 +66838738371 兩個都係老師 - 唔可以有+號
-TEACHER_JIDS = ["85246447827@s.whatsapp.net", "85246447827", "66838738371@s.whatsapp.net", "66838738371"]
+# 鎖死：兩個都係老師 - 用數字比對，咩格式都認到
+TEACHER_NUMBERS = ["85246447827", "66838738371"]
 
 print(f"BOOT AQ len={len(GEMINI_API_KEY)} TEACHER=852+668")
 
@@ -121,8 +121,11 @@ def webhook():
 
     def is_teacher_user():
         check_id = participant if is_group else jid
-        for tid in TEACHER_JIDS:
-            if tid in check_id:
+        # 抽晒所有數字出嚟比對，例如 85246447827:13@lid -> 8524644782713，都會包含 85246447827
+        digits = re.sub(r'\D', '', check_id)
+        print(f"[TEACHER_CHECK] raw={check_id} digits={digits}")
+        for t in TEACHER_NUMBERS:
+            if t in digits or digits.endswith(t) or t in check_id:
                 return True
         return False
 
@@ -136,7 +139,7 @@ def webhook():
                 GROUP_STATE[jid] = True
                 send_text(jid, f"✅ 老師已開放提問，依家同學可以問 LC Sir 喇！\n打法：LC 幫我睇下呢題")
             else:
-                send_text(jid, "⛔ 只有老師先可以開放提問呀～")
+                send_text(jid, f"⛔ 只有老師先可以開放提問呀～ (你: {participant})")
             return jsonify({"ok": True}), 200
         
         if any(k in text for k in ["關閉提問", "關閉發問", "/close", "停止發問", "收工"]) or low == "close":
