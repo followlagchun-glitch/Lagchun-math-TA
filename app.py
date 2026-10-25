@@ -120,26 +120,31 @@ def webhook():
         return any(t in digits for t in TEACHER_NUMBERS)
     if is_group:
         if jid not in GROUP_STATE:
-            GROUP_STATE[jid]=True  # 預設開，解決自己關問題
+            GROUP_STATE[jid]=True
             save_state()
         low=text.lower().strip()
-        if any(k in text for k in ["開放提問","開放發問","/open","開始發問","開放功課"]) or low=="open":
+        # === 開放關鍵字，加晒你講嘅 ===
+        open_keys = ["開放提問","開放發問","開始發問","開始提問","開放功課","/open","開始"]
+        if any(k in text for k in open_keys) or low in ["open","開始","開放"]:
             GROUP_STATE[jid]=True; save_state()
-            send_text(jid, "✅ 老師已開放提問，會一直開放直到老師打「關閉提問」為止\n打法：LC 幫我睇下呢題")
+            send_text(jid, "✅ 【提問開始】\n老師已開放提問！依家同學可以問 LC Sir 喇～\n👉 打法：LC 幫我睇下呢題 + 相\n(會一直開住，直到老師打「關閉提問」先關)")
             return jsonify({"ok": True}), 200
-        if any(k in text for k in ["關閉提問","關閉發問","/close","停止發問","收工"]) or low=="close":
+        # === 關閉關鍵字，加晒 ===
+        close_keys = ["關閉提問","關閉發問","結束提問","結束發問","/close","停止發問","收工","關閉","結束"]
+        if any(k in text for k in close_keys) or low in ["close","關閉","結束"]:
             GROUP_STATE[jid]=False; save_state()
-            send_text(jid, "🔒 老師已關閉提問，LC Sir 休息中。")
+            send_text(jid, "🔒 【提問結束】\n老師已關閉提問，LC Sir 休息中～\n同學暫時唔可以再問喇，等下次開放！")
             return jsonify({"ok": True}), 200
         if not GROUP_STATE[jid]:
             if any(k in low for k in ["lc","阿sir","阿 sir","sir","老師"]) or "imageMessage" in msg or "documentMessage" in msg:
                 if not is_teacher_user():
                     if any(k in low for k in ["lc","sir","老師"]):
-                        send_text(jid, "⏳ 而家未開放提問，等老師講「開放提問」先可以問 LC Sir 呀～")
+                        send_text(jid, "⏳ 而家未開放提問，等老師講「開始提問」先可以問 LC Sir 呀～")
                     return jsonify({"ok": True}), 200
     if from_me and not is_group: return jsonify({"ok": True}), 200
     if from_me and is_group:
-        if not any(k in text for k in ["開放提問","關閉提問","/open","/close","open","close"]):
+        # from_me 都要放行開放/關閉所有講法
+        if not any(k in text for k in ["開放","開始","關閉","結束","/open","/close","open","close"]):
             return jsonify({"ok": True}), 200
     if is_group:
         low=text.lower()
