@@ -5,7 +5,6 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "").strip().rstrip("/")
 EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
-# 淨係你先可以開關
 TEACHER_NUMBERS = ["85246447827"]
 
 STATE_FILE = "/tmp/group_state.json"
@@ -20,12 +19,14 @@ def save_state():
     try:
         with open(STATE_FILE, "w") as f:
             json.dump(GROUP_STATE, f)
-        print(f"[SAVE_STATE] {GROUP_STATE}")
     except Exception as e:
         print(f"[SAVE_STATE] err {e}")
 
 GROUP_STATE = load_state()
-print(f"BOOT FINAL TEACHER-ONLY len={len(GEMINI_API_KEY)} state={GROUP_STATE}")
+SEEN_IDS = {}
+LOCK = threading.Lock()
+
+print(f"BOOT NO-AUTO-DUP len={len(GEMINI_API_KEY)} state={GROUP_STATE}")
 
 SYSTEM_PROMPT = """You are LC Sir, Hong Kong DSE Math tutor. Friendly, simple, short, like a real person.
 CRITICAL RULES:
@@ -34,30 +35,21 @@ CRITICAL RULES:
 - Use *bold* for Q titles, short lines, HK Cantonese口語.
 - No LaTeX ever.
 
-OUTPUT FORMAT - PDF功課改卷模式 (最重要):
-當見到學生上傳功課PDF或多題圖片，逐題改：
-
+OUTPUT FORMAT - PDF功課改卷模式:
 如果全對：
 ---
 *Q1* ✅ 全對！做得好靚，繼續保持！
-
-如果有錯 / 有改善位：
+如果有錯：
 ---
 *Q1*
 ✅ 啱嘅地方：
-- 例如：公式用啱 a² + b² = c²
+- ...
 ❌ 錯 / 漏嘅地方：
-- 例如：3² 計做 6
+- ...
 💬 Comment：一句講整體
 💡 應該點寫：h² = 100 - 9 = 91，h = √91
 GRAPH_EQUATION: 如果有圖就加 y = ...
-
-如果係單題提問，就用短版：
----
-*Q1* ✅ / ❌ 簡短講
-
-最後：
-💡 總結：2行講晒通病 + 下次點避免
+最後 💡 總結 2行
 """
 
 MODELS = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.5-flash"]
@@ -126,27 +118,23 @@ def send_text(jid, text):
             time.sleep(0.5)
     except Exception as e: print(f"Send fail {e}")
 
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    body=request.json or {}
-    data=body.get("data", {})
-    key=data.get("key", {})
-    msg=data.get("message", {})
-    jid=key.get("remoteJid")
-    push_name=data.get("pushName") or ""
-    participant=key.get("participant") or data.get("participant") or ""
-    from_me=key.get("fromMe", False)
-    if not jid: return jsonify({"ok": True}), 200
-    is_group="@g.us" in jid
-    text=msg.get("conversation") or msg.get("extendedTextMessage", {}).get("text") or ""
-    if not text and "imageMessage" in msg: text=msg["imageMessage"].get("caption") or ""
-    print(f"[IN] fromMe={from_me} jid={jid} part={participant} text={text[:80]}")
+def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
+    # 只用 ID 去重，5分鐘內同一個 ID 先叫重覆
+    with LOCK:
+        now=time.time()
+        for k in list(SEEN_IDS.keys()):
+            if now - SEEN_IDS[k] > 300: del SEEN_IDS[k]
+        if msg_id in SEEN_IDS:
+            print(f"[SKIP AUTO-DUP] {msg_id}")
+            return
+        SEEN_IDS[msg_id]=now
 
     def is_teacher_user():
         if from_me: return True
-        digits=re.sub(r'\D','', participant if is_group else jid)
+        digits=re.sub(r'\D','', participant if "@g.us" in jid else jid)
         return any(t in digits for t in TEACHER_NUMBERS)
 
+    is_group="@g.us" in jid
     if is_group:
         if jid not in GROUP_STATE:
             GROUP_STATE[jid]=True
@@ -154,38 +142,32 @@ def webhook():
         low=text.lower().strip()
         open_keys = ["開放提問","開放發問","開始發問","開始提問","開放功課","/open","開始"]
         close_keys = ["關閉提問","關閉發問","結束提問","結束發問","/close","停止發問","收工","關閉","結束"]
-
         if any(k in text for k in open_keys) or low in ["open","開始","開放"]:
-            if not is_teacher_user():
-                return jsonify({"ok": True}), 200
+            if not is_teacher_user(): return
             GROUP_STATE[jid]=True; save_state()
-            send_text(jid, "✅ 【提問開始】\n老師已開放提問！依家同學可以問 LC Sir 喇～\n👉 打法：LC 幫我睇下呢題 + 相\n(會一直開住，直到老師打「關閉提問」先關)")
-            return jsonify({"ok": True}), 200
-
+            send_text(jid, "✅ \n老師已開放提問！依家同學可以問 LC Sir 喇～\n👉 打法：LC 幫我睇下呢題 + 相\n(會一直開住，直到老師打「關閉提問」先關)")
+            return
         if any(k in text for k in close_keys) or low in ["close","關閉","結束"]:
-            if not is_teacher_user():
-                return jsonify({"ok": True}), 200
+            if not is_teacher_user(): return
             GROUP_STATE[jid]=False; save_state()
-            send_text(jid, "🔒 【提問結束】\n老師已關閉提問，LC Sir 休息中～\n同學暫時唔可以再問喇，等下次開放！")
-            return jsonify({"ok": True}), 200
-
+            send_text(jid, "🔒 \n老師已關閉提問，LC Sir 休息中～")
+            return
         if not GROUP_STATE[jid]:
             if any(k in low for k in ["lc","阿sir","阿 sir","sir","老師"]) or "imageMessage" in msg or "documentMessage" in msg:
                 if not is_teacher_user():
                     if any(k in low for k in ["lc","sir","老師"]):
                         send_text(jid, "⏳ 而家未開放提問，等老師講「開始提問」先可以問 LC Sir 呀～")
-                    return jsonify({"ok": True}), 200
+                    return
 
-    if from_me and not is_group: return jsonify({"ok": True}), 200
-    if from_me and is_group:
+    if from_me and not is_group: return
+    if from_me and "@g.us" in jid:
         if not any(k in text for k in ["開放","開始","關閉","結束","/open","/close","open","close","lc","阿sir","老師"]):
-            return jsonify({"ok": True}), 200
-
-    if is_group:
+            return
+    if "@g.us" in jid:
         low=text.lower()
         if not any(k in low for k in ["lc","阿sir","阿 sir","sir","老師"]) and "imageMessage" not in msg and "documentMessage" not in msg:
             if not msg.get("imageMessage", {}).get("caption"):
-                return jsonify({"ok": True}), 200
+                return
         text=f"[{push_name} 問]: {text}"
 
     b64,mime=None,"image/jpeg"
@@ -197,22 +179,20 @@ def webhook():
         b64,mime=get_file_base64(data, is_pdf=True)
         text=(text or "幫我睇下呢份PDF功課").strip()
         mime="application/pdf"
-    if not text and not b64: return jsonify({"ok": True}), 200
+    if not text and not b64: return
     if ("imageMessage" in msg or "documentMessage" in msg) and not b64:
         send_text(jid, "張圖仲 load 緊，麻煩 send 多次新相，唔好 forward 舊相 🙏")
-        return jsonify({"ok": True}), 200
+        return
 
     stop_typing = threading.Event()
     t = threading.Thread(target=send_typing, args=(jid, stop_typing), daemon=True)
     t.start()
-
     answer,_=call_gemini(text, b64, mime)
-
     stop_typing.set()
 
     graphs=re.findall(r"GRAPH_EQUATION:\s*(.+)", answer)
     clean_answer=re.sub(r"GRAPH_EQUATION:\s*.+", "", answer).strip()
-    if is_group and push_name: clean_answer=f"@{push_name} {clean_answer}"
+    if "@g.us" in jid and push_name: clean_answer=f"@{push_name} {clean_answer}"
     send_text(jid, clean_answer)
     if graphs:
         time.sleep(0.8)
@@ -223,10 +203,28 @@ def webhook():
             geogebra=f"https://www.geogebra.org/graphing?lang=en&command={urllib.parse.quote(eq)}"
             send_text(jid, f"📊 {q_label} 視像化：{eq}\n👉 Desmos: {desmos}\n👉 GeoGebra: {geogebra}")
             time.sleep(0.5)
+
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    body=request.json or {}
+    data=body.get("data", {})
+    key=data.get("key", {})
+    msg=data.get("message", {})
+    jid=key.get("remoteJid")
+    push_name=data.get("pushName") or ""
+    participant=key.get("participant") or data.get("participant") or ""
+    from_me=key.get("fromMe", False)
+    if not jid: return jsonify({"ok": True}), 200
+    text=msg.get("conversation") or msg.get("extendedTextMessage", {}).get("text") or ""
+    if not text and "imageMessage" in msg: text=msg["imageMessage"].get("caption") or ""
+    msg_id = key.get("id") or str(data.get("id") or "") or f"no-id-{int(time.time()*1000)}"
+    print(f"[IN] id={msg_id} fromMe={from_me} jid={jid} text={text[:80]}")
+    # 重點：即刻回 200，先做野，唔等 Gemini
+    threading.Thread(target=do_work, args=(jid, text, push_name, participant, from_me, msg, data, msg_id), daemon=True).start()
     return jsonify({"ok": True}), 200
 
 @app.route("/", methods=["GET"])
-def home(): return f"LC Sir TEACHER-ONLY len={len(GEMINI_API_KEY)} state={GROUP_STATE}", 200
+def home(): return f"LC Sir NO-AUTO-DUP len={len(GEMINI_API_KEY)}", 200
 @app.route("/health", methods=["GET"])
 def health(): return "ok", 200
 if __name__=="__main__":
