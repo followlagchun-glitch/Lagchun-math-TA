@@ -12,7 +12,7 @@ STATE_FILE = "/tmp/group_state.json"
 
 def load_state():
     try:
-        if os.path.exists(STATE_FILE):
+        if os.path.exists(STATE_FILE)：
             with open(STATE_FILE, "r") as f:
                 return json.load(f)
     except:
@@ -45,18 +45,18 @@ RULES:
 - Last line ANNOTATIONS_JSON: []
 """
 OUTPUT FORMAT - PDF功課改卷模式:
-如果全對：
+如果全對:
 ---
 Q1 ✅ 全對！
-如果有錯：
+如果有錯:
 ---
 Q1
-✅ 啱：
+✅ 啱:
 - ...
-❌ 錯 / 漏：
+❌ 錯 / 漏:
 - ...
-💬 Comment：一句講整體
-💡 應該點寫：h² = 100 - 9 = 91，h = √91
+💬 Comment:一句講整體
+💡 應該點寫:h² = 100 - 9 = 91，h = √91
 GRAPH_EQUATION: 如果有圖就加 y = ...
 最後 💡 總結 2行
 """
