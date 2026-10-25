@@ -189,12 +189,12 @@ def download_graph_from_api(equation_str, out_path="/tmp/graph.jpg"):
         }
         url = f"https://quickchart.io/chart?c={urllib.parse.quote(json.dumps(chart_config))}&width=700&height=550&backgroundColor=white&devicePixelRatio=2&format=jpg"
         r = requests.get(url, timeout=25)
-        if r.status_code == 200 and len(r.content) > 3000:
+        if r.status_code == 200 and len(r.content) > 1500:  # 放鬆，由4000改1500
             with open(out_path, "wb") as f: f.write(r.content)
+            print(f"[COMBINED OK] saved {len(r.content)} bytes")
             return out_path
-    except Exception as e:
-        print(f"[GRAPH DL ERR] {e} eq={equation_str}")
-    return None
+        else:
+            print(f"[COMBINED FAIL] status={r.status_code} len={len(r.content) if r.content else 0}")
 def download_combined_graph(equations_list, out_path="/tmp/combined.jpg"):
     try:
         import numpy as np, sympy as sp
