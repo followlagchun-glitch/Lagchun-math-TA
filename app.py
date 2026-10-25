@@ -29,62 +29,62 @@ LOCK = threading.Lock()
 TICK = "\u2705"
 CROSS = "\u274c"
 
-print(f"BOOT TYPING-FIX DSE FINAL len={len(GEMINI_API_KEY)} state={GROUP_STATE}")
+print(f"BOOT TYPING-FIX DSE FINAL-GUARANTEED len={len(GEMINI_API_KEY)}")
 
-# 唔用 f-string，避免 DSE課題 NameError
+# 用普通"""唔用f"""，避免NameError
 SYSTEM_PROMPT = """
-You are LC Sir, Hong Kong DSE Math 專家，團隊 LC Math。Friendly, HK Cantonese。
+You are LC Sir, Hong Kong DSE Math 專家，團隊 LC Math，20年經驗。Friendly, HK Cantonese。
 
-NEVER LATEX - VERY STRICT:
-- NEVER use $ $ or $$ $$ or \\( \\) or \\[ \\] or \\frac \\text \\sqrt \\^
-- Use pretty Unicode ONLY: ² ³ √ ½ ¼ ¾ × ÷
+=== 鐵律1：NEVER LATEX ===
+- NEVER用 $ $ $$ $$ \\( \\) \\[ \\] \\frac \\text \\sqrt \\^
+- 只能用靚Unicode：² ³ √ ½ ¼ ¾ × ÷
 - y = (x+9)/2, h² = 100 - 9 = 91, h = √91
-- 絕對唔可以用 LaTeX，否則失敗
 
-LANGUAGE - VERY STRICT:
-- MUST Traditional Chinese ONLY (繁體中文)
-- MUST HK Cantonese口語：係, 唔係, 睇下, 呢度
-- NEVER Simplified Chinese
+=== 鐵律2：繁體廣東話 ===
+- MUST繁體中文ONLY，口語：係, 唔係, 睇下, 呢題, 呢度
+- NEVER簡體
 
-CRITICAL - 每條一開頭定生死：
-- 改功課模式，每條第一行必須直接講啱定錯
+=== 鐵律3：一開頭定生死 (最重要) ===
+- 改功課模式，每條Q第一行必須直接講結果，唔可以講其他先
 - 錯：Q1 ❌ 呢題肯定唔啱，答錯咗喎！
-- 啱：Q1 ✅ 呢題啱晒！肯定啱！DSE滿分！
-- 唔可以先講其他廢話，必須第一行定生死
+- 啱：Q1 ✅ 呢題啱晒！肯定啱！DSE滿分Level！
+- 之後先講 ✅啱嘅地方 / ❌錯嘅地方
+
+=== 鐵律4：保證觸發合併圖 (死命令) ===
+- 只要見到任何包含 x,y 嘅方程，直線，二次，圓，例如 x-2y+9=0, y=x+1, y=-2x+4, y=x²+3, 你必須輸出 GRAPH_EQUATION
+- 每條方程一行：GRAPH_EQUATION: x-2y+9=0
+- 有兩條就要出兩行，系統會自動合併做一張圖
+- 就算題目冇問畫圖，你都要出，方便學生睇
+- 呢個係強制，唔出就係失敗
+
+=== 鐵律5：紅圈標記 ===
+- 如果有錯，一定要出 ANNOTATIONS_JSON: [{"x":0.5,"y":0.4}] 標記錯嘅位置
 
 分兩個模式：
 
-模式A - 問問題模式 (只有題目，冇手寫答案)：
-- 絕對唔可以講 啱嘅地方 / 錯嘅地方
-- 格式：
-*題目拆解*：DSE咩課題...
-*DSE概念*：考咩 Concept...
-*技巧*：DSE點諗...
-*點做*：
-1. ...
-2. ...
+模式A - 問問題模式 (只有題目，冇手寫)：
+- 絕對唔可以講錯嘅地方
+*題目拆解*：DSE咩課題
+*DSE概念*：考咩
+*技巧*：點諗
+*點做*：1. 2.
 *答案*：...
-💡 DSE伏位：...
+💡 DSE伏位
+GRAPH_EQUATION: ...
 
-模式B - 改功課模式 (有學生手寫步驟)：
+模式B - 改功課模式 (有手寫)：
 ---
-Q1 ❌ 呢題肯定唔啱，DSE會0分喎！
-DSE課題：例如 概率
-✅ 啱嘅地方：
-- 步驟清晰，公式用啱
-❌ 錯 / 漏嘅地方：
-- 第二行抄錯
-💬 DSE評語：一句人性化 + DSE marking角度
-💡 應該點寫：h² = 100 - 9 = 91，h = √91
+Q1 ❌ 呢題唔啱！
+DSE課題：...
+✅ 啱嘅地方：...
+❌ 錯 / 漏嘅地方：...
+💬 DSE評語：...
+💡 應該點寫：...
 💡 DSE概念重溫：...
+GRAPH_EQUATION: ...
+ANNOTATIONS_JSON: [{"x":0.5,"y":0.5}]
 
-Q2 ✅ 呢題啱晒！肯定啱！
-
-最後加：
-GRAPH_EQUATION: x-2y+9=0 (如果有直線先加)
 最後 💡 DSE總結 2行
-
-判斷：有手寫=模式B，冇=模式A
 """
 
 MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash", "gemini-3.5-flash-lite"]
@@ -123,7 +123,7 @@ def get_file_base64(data, is_pdf=False):
     return None, None
 
 def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
-    prompt=SYSTEM_PROMPT+f"\n\n學生: {question}\n記得：一開頭定生死，繁體，唔用LaTeX，DSE專業"
+    prompt=SYSTEM_PROMPT+f"\n\n學生: {question}"
     last_error=""
     for model in MODELS:
         url=f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -139,7 +139,7 @@ def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
                 return txt, "ok"
             last_error=r.text[:800]
         except Exception as e: last_error=str(e)
-    return f"暫時連唔到，稍後再試: {last_error[:200]}", "error"
+    return f"暫時連唔到", "error"
 
 def send_typing(jid, stop_event):
     url = f"{EVOLUTION_API_URL}/chat/sendPresence/{EVOLUTION_INSTANCE}"
@@ -164,12 +164,39 @@ def send_text(jid, text):
             time.sleep(0.5)
     except Exception as e: print(f"Send fail {e}")
 
-def send_image(jid, image_path, caption):
+def create_annotated_image(original_b64, annotations):
     try:
-        b64_data=base64.b64encode(open(image_path,"rb").read()).decode()
+        from PIL import Image, ImageDraw
+        img_data=base64.b64decode(clean_b64(original_b64))
+        img=Image.open(io.BytesIO(img_data)).convert("RGB")
+        draw=ImageDraw.Draw(img)
+        w,h=img.size
+        if not annotations:
+            draw.ellipse([w*0.15,h*0.3,w*0.85,h*0.6], outline="red", width=8)
+        else:
+            for ann in annotations[:6]:
+                try:
+                    cx,cy=int(w*float(ann.get("x",0.5))),int(h*float(ann.get("y",0.5)))
+                    r=int(min(w,h)*0.08)
+                    draw.ellipse([cx-r,cy-r,cx+r,cy+r], outline="red", width=6)
+                except: continue
+        buf=io.BytesIO()
+        img.save(buf,"JPEG",quality=92)
+        return base64.b64encode(buf.getvalue()).decode()
+    except Exception as e:
+        print(f"[ANNOTATE] {e}")
+        return None
+
+def send_image(jid, image_input, caption):
+    try:
+        if isinstance(image_input, str) and os.path.exists(image_input):
+            b64_data=base64.b64encode(open(image_input,"rb").read()).decode()
+        else:
+            b64_data=clean_b64(image_input)
+        if not b64_data or len(b64_data)<1000: return False
         url=f"{EVOLUTION_API_URL}/message/sendMedia/{EVOLUTION_INSTANCE}"
         headers={"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
-        payload={"number": jid, "mediatype": "image", "media": b64_data, "caption": caption, "fileName": "graph.jpg"}
+        payload={"number": jid, "mediatype": "image", "media": b64_data, "caption": caption, "fileName": "marked.jpg"}
         r=requests.post(url, json=payload, headers=headers, timeout=30)
         return r.status_code in [200,201]
     except Exception as e:
@@ -216,8 +243,7 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
         now=time.time()
         for k in list(SEEN_IDS.keys()):
             if now - SEEN_IDS[k] > 300: del SEEN_IDS[k]
-        if msg_id in SEEN_IDS:
-            return
+        if msg_id in SEEN_IDS: return
         SEEN_IDS[msg_id]=now
 
     stop_typing = threading.Event()
@@ -231,23 +257,20 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
     is_group="@g.us" in jid
     if is_group:
         if jid not in GROUP_STATE:
-            GROUP_STATE[jid]=True
-            save_state()
+            GROUP_STATE[jid]=True; save_state()
         low=text.lower().strip()
         open_keys = ["開放提問","開放發問","開始發問","開始提問","開放功課","/open","開始"]
         close_keys = ["關閉提問","關閉發問","結束提問","結束發問","/close","停止發問","收工","關閉","結束"]
         if any(k in text for k in open_keys) or low in ["open","開始","開放"]:
             if not is_teacher_user(): 
-                stop_typing.set()
-                return
+                stop_typing.set(); return
             GROUP_STATE[jid]=True; save_state()
             stop_typing.set()
             send_text(jid, f"{TICK} \n老師已開放提問！依家同學可以問 LC Sir 喇～")
             return
         if any(k in text for k in close_keys) or low in ["close","關閉","結束"]:
             if not is_teacher_user():
-                stop_typing.set()
-                return
+                stop_typing.set(); return
             GROUP_STATE[jid]=False; save_state()
             stop_typing.set()
             send_text(jid, "🔒 \n老師已關閉提問，LC Sir 休息中～")
@@ -261,18 +284,15 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
                     return
 
     if from_me and not is_group:
-        stop_typing.set()
-        return
+        stop_typing.set(); return
     if from_me and "@g.us" in jid:
         if not any(k in text for k in ["開放","開始","關閉","結束","/open","/close","open","close","lc","阿sir","老師"]):
-            stop_typing.set()
-            return
+            stop_typing.set(); return
     if "@g.us" in jid:
         low=text.lower()
         if not any(k in low for k in ["lc","阿sir","阿 sir","sir","老師"]) and "imageMessage" not in msg and "documentMessage" not in msg:
             if not msg.get("imageMessage", {}).get("caption"):
-                stop_typing.set()
-                return
+                stop_typing.set(); return
         text=f"[{push_name} 問]: {text}"
 
     b64,mime=None,"image/jpeg"
@@ -285,8 +305,7 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
         text=(text or "幫我睇下呢份PDF功課").strip()
         mime="application/pdf"
     if not text and not b64:
-        stop_typing.set()
-        return
+        stop_typing.set(); return
     if ("imageMessage" in msg or "documentMessage" in msg) and not b64:
         stop_typing.set()
         send_text(jid, "張圖仲 load 緊，麻煩 send 多次新相，唔好 forward 舊相 🙏")
@@ -295,10 +314,24 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
     answer,_=call_gemini(text, b64, mime)
     stop_typing.set()
 
+    annotations=[]
+    m_ann=re.search(r"ANNOTATIONS_JSON:\s*(\[.*?\])", answer, re.DOTALL)
+    if m_ann:
+        try: annotations=json.loads(m_ann.group(1))
+        except: pass
+
     graphs=re.findall(r"GRAPH_EQUATION:\s*(.+)", answer)
     clean_answer=re.sub(r"GRAPH_EQUATION:\s*.+", "", answer).strip()
+    clean_answer=re.sub(r"ANNOTATIONS_JSON:.*", "", clean_answer, flags=re.DOTALL).strip()
     if "@g.us" in jid and push_name: clean_answer=f"@{push_name} {clean_answer}"
+    
     send_text(jid, clean_answer)
+
+    if b64 and mime!="application/pdf" and CROSS in clean_answer:
+        img_b64=create_annotated_image(b64, annotations)
+        if img_b64:
+            time.sleep(0.6)
+            send_image(jid, img_b64, f"{CROSS} 睇圖，紅圈就係錯嘅位")
 
     if graphs:
         clean_graphs=[]
@@ -336,7 +369,7 @@ def webhook():
     return jsonify({"ok": True}), 200
 
 @app.route("/", methods=["GET"])
-def home(): return f"LC Sir DSE FINAL {TICK} len={len(GEMINI_API_KEY)}", 200
+def home(): return f"LC Sir GUARANTEED GRAPH {TICK} len={len(GEMINI_API_KEY)}", 200
 @app.route("/health", methods=["GET"])
 def health(): return "ok", 200
 if __name__=="__main__":
