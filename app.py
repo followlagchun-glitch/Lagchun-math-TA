@@ -52,7 +52,7 @@ GRAPH_EQUATION: 如果有圖就加 y = ...
 最後一定要加 ANNOTATIONS_JSON: [{"label":"3²計錯","x":0.5,"y":0.4}] x,y係0-1座標。全對就 []
 """
 
-MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
+MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-3.5-flash-lite"]
 
 def clean_b64(b64):
     if not b64: return None
