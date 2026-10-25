@@ -1,8 +1,6 @@
 from flask import Flask, request, jsonify
 import os, requests, re, urllib.parse, base64, time, json, threading, io
-
 app = Flask(__name__)
-
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "").strip().rstrip("/")
 EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
@@ -30,59 +28,63 @@ LOCK = threading.Lock()
 
 TICK = "\u2705"
 CROSS = "\u274c"
-LOCK_ICON = "\U0001f512"
-HOURGLASS = "\u23f3"
 
-print(f"BOOT ULTIMATE DSE PRO FIXED len={len(GEMINI_API_KEY)} state={GROUP_STATE}")
+print(f"BOOT TYPING-FIX DSE FINAL len={len(GEMINI_API_KEY)} state={GROUP_STATE}")
 
-# 注意：唔用 f-string，避免 NameError
+# 唔用 f-string，避免 DSE課題 NameError
 SYSTEM_PROMPT = """
-You are LC Sir, Hong Kong DSE Math 專家，10年DSE經驗，團隊係 LC Math。Friendly, HK Cantonese, 但要非常專業。
+You are LC Sir, Hong Kong DSE Math 專家，團隊 LC Math。Friendly, HK Cantonese。
 
 NEVER LATEX - VERY STRICT:
-- NEVER use $ $ or $$ $$ or \\( \\) or \\[ \\] or \\frac \\text \\sqrt
+- NEVER use $ $ or $$ $$ or \\( \\) or \\[ \\] or \\frac \\text \\sqrt \\^
 - Use pretty Unicode ONLY: ² ³ √ ½ ¼ ¾ × ÷
-- y = (x+9)/2
+- y = (x+9)/2, h² = 100 - 9 = 91, h = √91
+- 絕對唔可以用 LaTeX，否則失敗
 
-LANGUAGE:
-- MUST Traditional Chinese ONLY (繁體), HK Cantonese
+LANGUAGE - VERY STRICT:
+- MUST Traditional Chinese ONLY (繁體中文)
+- MUST HK Cantonese口語：係, 唔係, 睇下, 呢度
+- NEVER Simplified Chinese
 
-你係DSE專家，必須分兩個模式：
+CRITICAL - 每條一開頭定生死：
+- 改功課模式，每條第一行必須直接講啱定錯
+- 錯：Q1 ❌ 呢題肯定唔啱，答錯咗喎！
+- 啱：Q1 ✅ 呢題啱晒！肯定啱！DSE滿分！
+- 唔可以先講其他廢話，必須第一行定生死
 
-模式A - 問問題模式 (只有題目，冇手寫答案) - 唔講啱錯，專業拆解：
-格式：
-*題目拆解*：呢條係DSE咩課題？咩卷型？
-*DSE概念*：考咩 Concept？例如 排列組合要分清楚有冇次序
-*技巧*：DSE常用技巧
+分兩個模式：
+
+模式A - 問問題模式 (只有題目，冇手寫答案)：
+- 絕對唔可以講 啱嘅地方 / 錯嘅地方
+- 格式：
+*題目拆解*：DSE咩課題...
+*DSE概念*：考咩 Concept...
+*技巧*：DSE點諗...
 *點做*：
 1. ...
 2. ...
 *答案*：...
-小貼士：DSE成日喺呢度設伏...
+💡 DSE伏位：...
 
-模式B - 改功課模式 (有學生手寫) - 專業DSE角度評核：
-格式：
+模式B - 改功課模式 (有學生手寫步驟)：
 ---
 Q1 ❌ 呢題肯定唔啱，DSE會0分喎！
-DSE課題：排列組合 / 概率
+DSE課題：例如 概率
 ✅ 啱嘅地方：
-- 概念用啱
+- 步驟清晰，公式用啱
 ❌ 錯 / 漏嘅地方：
-- DSE計錯總數
-DSE評語：以DSE marking嚟講...
-應該點寫：總共有 3種分法 = 3!/2! = 3
-DSE概念重溫：相同物件分唔同人
+- 第二行抄錯
+💬 DSE評語：一句人性化 + DSE marking角度
+💡 應該點寫：h² = 100 - 9 = 91，h = √91
+💡 DSE概念重溫：...
 
-Q2 ✅ 呢題啱晒！DSE滿分Level！
-✅ 啱嘅地方：技巧好純熟
+Q2 ✅ 呢題啱晒！肯定啱！
 
 最後加：
-GRAPH_EQUATION: x-2y+9=0
-ANNOTATIONS_JSON: [{"x":0.5,"y":0.3}]
-最後總結：2行，講佢整體DSE水平
+GRAPH_EQUATION: x-2y+9=0 (如果有直線先加)
+最後 💡 DSE總結 2行
 
 判斷：有手寫=模式B，冇=模式A
-CRITICAL: 專業DSE角度，唔好再對純問題講錯嘅地方！
 """
 
 MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash", "gemini-3.5-flash-lite"]
@@ -121,7 +123,7 @@ def get_file_base64(data, is_pdf=False):
     return None, None
 
 def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
-    prompt=SYSTEM_PROMPT+f"\n\n學生: {question}\n記得：你係DSE專家，分清問問題定改功課，繁體，唔用LaTeX"
+    prompt=SYSTEM_PROMPT+f"\n\n學生: {question}\n記得：一開頭定生死，繁體，唔用LaTeX，DSE專業"
     last_error=""
     for model in MODELS:
         url=f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -137,7 +139,7 @@ def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
                 return txt, "ok"
             last_error=r.text[:800]
         except Exception as e: last_error=str(e)
-    return f"{CROSS} 暫時連唔到，稍後再試: {last_error[:200]}", "error"
+    return f"暫時連唔到，稍後再試: {last_error[:200]}", "error"
 
 def send_typing(jid, stop_event):
     url = f"{EVOLUTION_API_URL}/chat/sendPresence/{EVOLUTION_INSTANCE}"
@@ -162,39 +164,12 @@ def send_text(jid, text):
             time.sleep(0.5)
     except Exception as e: print(f"Send fail {e}")
 
-def create_annotated_image(original_b64, annotations):
+def send_image(jid, image_path, caption):
     try:
-        from PIL import Image, ImageDraw
-        img_data=base64.b64decode(clean_b64(original_b64))
-        img=Image.open(io.BytesIO(img_data)).convert("RGB")
-        draw=ImageDraw.Draw(img)
-        w,h=img.size
-        if not annotations:
-            draw.ellipse([w*0.15,h*0.3,w*0.85,h*0.6], outline="red", width=8)
-        else:
-            for ann in annotations[:6]:
-                try:
-                    cx,cy=int(w*float(ann.get("x",0.5))),int(h*float(ann.get("y",0.5)))
-                    r=int(min(w,h)*0.08)
-                    draw.ellipse([cx-r,cy-r,cx+r,cy+r], outline="red", width=6)
-                except: continue
-        buf=io.BytesIO()
-        img.save(buf,"JPEG",quality=92)
-        return base64.b64encode(buf.getvalue()).decode()
-    except Exception as e:
-        print(f"[ANNOTATE] {e}")
-        return None
-
-def send_image(jid, image_input, caption):
-    try:
-        if isinstance(image_input, str) and os.path.exists(image_input):
-            b64_data=base64.b64encode(open(image_input,"rb").read()).decode()
-        else:
-            b64_data=clean_b64(image_input)
-        if not b64_data or len(b64_data)<1000: return False
+        b64_data=base64.b64encode(open(image_path,"rb").read()).decode()
         url=f"{EVOLUTION_API_URL}/message/sendMedia/{EVOLUTION_INSTANCE}"
         headers={"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
-        payload={"number": jid, "mediatype": "image", "media": b64_data, "caption": caption, "fileName": "marked.jpg"}
+        payload={"number": jid, "mediatype": "image", "media": b64_data, "caption": caption, "fileName": "graph.jpg"}
         r=requests.post(url, json=payload, headers=headers, timeout=30)
         return r.status_code in [200,201]
     except Exception as e:
@@ -275,14 +250,14 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
                 return
             GROUP_STATE[jid]=False; save_state()
             stop_typing.set()
-            send_text(jid, f"{LOCK_ICON} \n老師已關閉提問，LC Sir 休息中～")
+            send_text(jid, "🔒 \n老師已關閉提問，LC Sir 休息中～")
             return
         if not GROUP_STATE[jid]:
             if any(k in low for k in ["lc","阿sir","阿 sir","sir","老師"]) or "imageMessage" in msg or "documentMessage" in msg:
                 if not is_teacher_user():
                     stop_typing.set()
                     if any(k in low for k in ["lc","sir","老師"]):
-                        send_text(jid, f"{HOURGLASS} 而家未開放提問，等老師講「開始提問」先可以問 LC Sir 呀～")
+                        send_text(jid, "⏳ 而家未開放提問，等老師講「開始提問」先可以問 LC Sir 呀～")
                     return
 
     if from_me and not is_group:
@@ -320,24 +295,10 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
     answer,_=call_gemini(text, b64, mime)
     stop_typing.set()
 
-    annotations=[]
-    m_ann=re.search(r"ANNOTATIONS_JSON:\s*(\[.*?\])", answer, re.DOTALL)
-    if m_ann:
-        try: annotations=json.loads(m_ann.group(1))
-        except: pass
-
     graphs=re.findall(r"GRAPH_EQUATION:\s*(.+)", answer)
     clean_answer=re.sub(r"GRAPH_EQUATION:\s*.+", "", answer).strip()
-    clean_answer=re.sub(r"ANNOTATIONS_JSON:.*", "", clean_answer, flags=re.DOTALL).strip()
     if "@g.us" in jid and push_name: clean_answer=f"@{push_name} {clean_answer}"
-    
     send_text(jid, clean_answer)
-
-    if b64 and mime!="application/pdf" and CROSS in clean_answer:
-        img_b64=create_annotated_image(b64, annotations)
-        if img_b64:
-            time.sleep(0.6)
-            send_image(jid, img_b64, f"{CROSS} 睇圖，紅圈就係錯嘅位")
 
     if graphs:
         clean_graphs=[]
@@ -375,7 +336,7 @@ def webhook():
     return jsonify({"ok": True}), 200
 
 @app.route("/", methods=["GET"])
-def home(): return f"LC Sir FIXED {TICK}{CROSS} len={len(GEMINI_API_KEY)}", 200
+def home(): return f"LC Sir DSE FINAL {TICK} len={len(GEMINI_API_KEY)}", 200
 @app.route("/health", methods=["GET"])
 def health(): return "ok", 200
 if __name__=="__main__":
