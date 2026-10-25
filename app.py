@@ -187,6 +187,72 @@ def download_graph_from_api(equation_str, out_path="/tmp/graph.jpg"):
             return out_path
     except Exception as e: print(f"[GRAPH DL ERR] {e} eq={equation_str}")
     return None
+    def download_combined_graph(equations_list, out_path="/tmp/combined.jpg"):
+    try:
+        import numpy as np, sympy as sp, json, urllib.parse, requests
+        colors = ["rgb(225,29,72)", "rgb(45,112,179)", "rgb(22,163,74)", "rgb(234,179,8)", "rgb(147,51,234)"]
+        datasets = []
+        print(f"[COMBINED] try {equations_list}")
+
+        for idx, eq_raw_clean in enumerate(equations_list):
+            points = []
+            try:
+                eq_for_sym = eq_raw_clean.replace("²","**2").replace("³","**3").replace("^","**")
+                x, y = sp.symbols('x y')
+                if "=" in eq_for_sym:
+                    left, right = eq_for_sym.split("=",1)
+                    expr = sp.sympify(left) - sp.sympify(right)
+                    sol = sp.solve(expr, y)
+                    if sol:
+                        y_expr = sol[0]
+                        for xv in np.linspace(-10, 10, 300):
+                            try:
+                                yv = float(y_expr.subs(x, xv))
+                                if abs(yv) < 15:
+                                    points.append({"x": float(xv), "y": float(yv)})
+                            except: pass
+            except Exception as e:
+                print(f"[COMBINED SYMPY ERR] {e} for {eq_raw_clean}")
+            
+            if points:
+                datasets.append({
+                    "label": eq_raw_clean,
+                    "data": points,
+                    "showLine": True,
+                    "fill": False,
+                    "borderColor": colors[idx % len(colors)],
+                    "backgroundColor": colors[idx % len(colors)],
+                    "borderWidth": 3,
+                    "pointRadius": 0,
+                    "lineTension": 0
+                })
+
+        if not datasets:
+            return None
+
+        chart_config = {
+            "type": "scatter",
+            "data": {"datasets": datasets},
+            "options": {
+                "title": {"display": True, "text": " + ".join(equations_list)[:80], "fontSize": 16},
+                "legend": {"display": True, "position": "bottom"},
+                "scales": {
+                    "xAxes": [{"type": "linear", "position": "bottom", "ticks": {"min": -10, "max": 10, "stepSize": 1}, "gridLines": {"color": "#ddd"}}],
+                    "yAxes": [{"ticks": {"min": -10, "max": 10, "stepSize": 1}, "gridLines": {"color": "#ddd"}}]
+                }
+            }
+        }
+
+        url = f"https://quickchart.io/chart?c={urllib.parse.quote(json.dumps(chart_config))}&width=800&height=600&backgroundColor=white&devicePixelRatio=2&format=jpg"
+        r = requests.get(url, timeout=25)
+        print(f"[COMBINED] status={r.status_code} len={len(r.content)}")
+        if r.status_code == 200 and len(r.content) > 4000:
+            with open(out_path, "wb") as f:
+                f.write(r.content)
+            return out_path
+    except Exception as e:
+        print(f"[COMBINED ERR] {e}")
+    return None
 def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
     with LOCK:
         now=time.time()
@@ -265,14 +331,43 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
             if img_b64: time.sleep(0.8); send_image(jid, img_b64, f"@{push_name} 睇圖，紅圈就係錯嘅位")
     if graphs:
         time.sleep(0.8)
-        for idx, eq in enumerate(graphs):
-            eq=eq.strip().split("|")[0].strip()
-            g_path = download_graph_from_api(eq, out_path=f"/tmp/graph_{idx}.jpg")
-            if g_path: send_image(jid, g_path, f"📊 {eq} 圖像"); time.sleep(0.5)
-            desmos=f"https://www.desmos.com/calculator?expressions={urllib.parse.quote(eq)}"
-            geogebra=f"https://www.geogebra.org/graphing?lang=en&command={urllib.parse.quote(eq)}"
-            send_text(jid, f"📊 {eq} 互動版\n👉 Desmos: {desmos}\n👉 GeoGebra: {geogebra}"); time.sleep(0.5)
-@app.route("/webhook", methods=["POST"])
+        clean_graphs = []
+        seen_eq = set()
+        for eq in graphs:
+            eq = eq.strip().split("|")[0].strip()
+            if not eq: continue
+            k = eq.replace(" ","")
+            if k not in seen_eq:
+                seen_eq.add(k)
+                clean_graphs.append(eq)
+
+        if clean_graphs:
+            # 如果多過1條，就畫1張合併圖
+            if len(clean_graphs) > 1:
+                combined_path = download_combined_graph(clean_graphs, out_path="/tmp/combined.jpg")
+                if combined_path:
+                    send_image(jid, combined_path, f"📊 合併圖：{' , '.join(clean_graphs)}")
+                    time.sleep(0.4)
+            else:
+                # 1條就照舊
+                g_path = download_graph_from_api(clean_graphs[0], out_path="/tmp/graph_0.jpg")
+                if g_path:
+                    send_image(jid, g_path, f"📊 {clean_graphs[0]} 圖像")
+                    time.sleep(0.4)
+
+            # 互動 link 都係合併 1 個
+            import json as _json
+            expr_list = [{"latex": e, "color": "#c82a54" if i==0 else "#2d70b3" if i==1 else "#16a34a" if i==2 else "#000"} for i,e in enumerate(clean_graphs)]
+            desmos_url = f"https://www.desmos.com/calculator?expressions_list={urllib.parse.quote(_json.dumps(expr_list))}"
+            geogebra_combined = "; ".join(clean_graphs)
+            geogebra_url = f"https://www.geogebra.org/graphing?lang=en&command={urllib.parse.quote(geogebra_combined)}"
+
+            txt = f"📊 互動版 (已合併 {len(clean_graphs)} 條線)\n"
+            for e in clean_graphs:
+                txt += f"• {e}\n"
+            txt += f"\n👉 Desmos 一次睇晒: {desmos_url}\n"
+            txt += f"👉 GeoGebra 一次睇晒: {geogebra_url}"
+            send_text(jid, txt)
 def webhook():
     body=request.json or {}; data=body.get("data", {}); key=data.get("key", {}); msg=data.get("message", {}); jid=key.get("remoteJid"); push_name=data.get("pushName") or ""; participant=key.get("participant") or data.get("participant") or ""; from_me=key.get("fromMe", False)
     if not jid: return jsonify({"ok": True}), 200
