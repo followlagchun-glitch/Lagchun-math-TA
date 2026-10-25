@@ -1,6 +1,6 @@
-Flask
-requests
-Pillow
-numpy
-gunicorn
-sympy
+    Flask==2.3.3
+    requests==2.31.0
+    gunicorn==21.2.0
+    Pillow==10.0.0
+    numpy==1.26.4
+    sympy==1.12
