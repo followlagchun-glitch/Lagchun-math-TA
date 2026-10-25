@@ -29,11 +29,10 @@ LOCK = threading.Lock()
 TICK = "\u2705"
 CROSS = "\u274c"
 
-print(f"BOOT TYPING-FIX DSE FINAL-GUARANTEED len={len(GEMINI_API_KEY)}")
+print(f"BOOT FINAL-IMAGE-ONLY len={len(GEMINI_API_KEY)}")
 
-# 用普通"""唔用f"""，避免NameError
 SYSTEM_PROMPT = """
-You are LC Sir, Hong Kong DSE Math 專家，團隊 LC Math，20年經驗。Friendly, HK Cantonese。
+You are LC Sir, Hong Kong DSE Math 專家，團隊 LC Math，10年經驗。Friendly, HK Cantonese。
 
 === 鐵律1：NEVER LATEX ===
 - NEVER用 $ $ $$ $$ \\( \\) \\[ \\] \\frac \\text \\sqrt \\^
@@ -41,38 +40,34 @@ You are LC Sir, Hong Kong DSE Math 專家，團隊 LC Math，20年經驗。Frien
 - y = (x+9)/2, h² = 100 - 9 = 91, h = √91
 
 === 鐵律2：繁體廣東話 ===
-- MUST繁體中文ONLY，口語：係, 唔係, 睇下, 呢題, 呢度
+- MUST繁體中文ONLY，口語：係, 唔係, 睇下, 呢題
 - NEVER簡體
 
-=== 鐵律3：一開頭定生死 (最重要) ===
-- 改功課模式，每條Q第一行必須直接講結果，唔可以講其他先
-- 錯：Q1 ❌ 呢題肯定唔啱，答錯咗喎！
-- 啱：Q1 ✅ 呢題啱晒！肯定啱！DSE滿分Level！
-- 之後先講 ✅啱嘅地方 / ❌錯嘅地方
+=== 鐵律3：一開頭定生死 ===
+- 改功課模式，每條Q第一行必須直接講結果
+- 錯：Q1 ❌ 呢題唔啱，答錯咗！
+- 啱：Q1 ✅ 呢題啱晒！肯定啱！DSE滿分Level！YA
 
-=== 鐵律4：保證觸發合併圖 (死命令) ===
-- 只要見到任何包含 x,y 嘅方程，直線，二次，圓，例如 x-2y+9=0, y=x+1, y=-2x+4, y=x²+3, 你必須輸出 GRAPH_EQUATION
-- 每條方程一行：GRAPH_EQUATION: x-2y+9=0
-- 有兩條就要出兩行，系統會自動合併做一張圖
-- 就算題目冇問畫圖，你都要出，方便學生睇
-- 呢個係強制，唔出就係失敗
+=== 鐵律4：分題出圖，標明Q ===
+- 只要見到 x,y 方程，直線，二次，必須標明Q
+- 格式：GRAPH_EQUATION Q1: y=x+1
+- 有兩條同Q： GRAPH_EQUATION Q1: y=x+1 和 GRAPH_EQUATION Q1: y=-2x+4 會合併
+- 唔同Q分開出，禁止大拼圖
 
 === 鐵律5：紅圈標記 ===
-- 如果有錯，一定要出 ANNOTATIONS_JSON: [{"x":0.5,"y":0.4}] 標記錯嘅位置
+- 有錯就出：ANNOTATIONS_JSON: [{"x":0.5,"y":0.4}]
 
 分兩個模式：
-
-模式A - 問問題模式 (只有題目，冇手寫)：
-- 絕對唔可以講錯嘅地方
+模式A - 問問題 (冇手寫)：
 *題目拆解*：DSE咩課題
 *DSE概念*：考咩
 *技巧*：點諗
 *點做*：1. 2.
 *答案*：...
 💡 DSE伏位
-GRAPH_EQUATION: ...
+GRAPH_EQUATION Q1: ...
 
-模式B - 改功課模式 (有手寫)：
+模式B - 改功課 (有手寫)：
 ---
 Q1 ❌ 呢題唔啱！
 DSE課題：...
@@ -80,10 +75,8 @@ DSE課題：...
 ❌ 錯 / 漏嘅地方：...
 💬 DSE評語：...
 💡 應該點寫：...
-💡 DSE概念重溫：...
-GRAPH_EQUATION: ...
+GRAPH_EQUATION Q1: ...
 ANNOTATIONS_JSON: [{"x":0.5,"y":0.5}]
-
 最後 💡 DSE總結 2行
 """
 
@@ -296,17 +289,19 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
         text=f"[{push_name} 問]: {text}"
 
     b64,mime=None,"image/jpeg"
-    if "imageMessage" in msg:
+    is_image_msg = "imageMessage" in msg
+    is_pdf_msg = "documentMessage" in msg
+    if is_image_msg:
         b64,mime=get_file_base64(data, is_pdf=False)
         cap=msg["imageMessage"].get("caption") or ""
         text=(cap or text or "幫我睇下呢份功課").strip()
-    elif "documentMessage" in msg:
+    elif is_pdf_msg:
         b64,mime=get_file_base64(data, is_pdf=True)
         text=(text or "幫我睇下呢份PDF功課").strip()
         mime="application/pdf"
     if not text and not b64:
         stop_typing.set(); return
-    if ("imageMessage" in msg or "documentMessage" in msg) and not b64:
+    if (is_image_msg or is_pdf_msg) and not b64:
         stop_typing.set()
         send_text(jid, "張圖仲 load 緊，麻煩 send 多次新相，唔好 forward 舊相 🙏")
         return
@@ -320,36 +315,59 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
         try: annotations=json.loads(m_ann.group(1))
         except: pass
 
-    graphs=re.findall(r"GRAPH_EQUATION:\s*(.+)", answer)
-    clean_answer=re.sub(r"GRAPH_EQUATION:\s*.+", "", answer).strip()
+    graphs=re.findall(r"GRAPH_EQUATION(?:\s+Q\d+)?:\s*(.+)", answer)
+    # 兼容新格式 Q1: y=x+1
+    full_q_graphs=re.findall(r"GRAPH_EQUATION\s+(Q\d+):\s*(.+)", answer, re.I)
+    
+    clean_answer=re.sub(r"GRAPH_EQUATION.*", "", answer).strip()
     clean_answer=re.sub(r"ANNOTATIONS_JSON:.*", "", clean_answer, flags=re.DOTALL).strip()
     if "@g.us" in jid and push_name: clean_answer=f"@{push_name} {clean_answer}"
     
     send_text(jid, clean_answer)
 
-    if b64 and mime!="application/pdf" and CROSS in clean_answer:
-        img_b64=create_annotated_image(b64, annotations)
-        if img_b64:
-            time.sleep(0.6)
-            send_image(jid, img_b64, f"{CROSS} 睇圖，紅圈就係錯嘅位")
+    # === 紅圈 + 合併圖 只限相片功課 ===
+    is_image_homework = is_image_msg
 
-    if graphs:
-        clean_graphs=[]
-        seen=set()
-        for eq in graphs:
-            eq=eq.strip().split("|")[0].strip()
-            k=eq.replace(" ","")
-            if k not in seen and len(eq)>2:
-                seen.add(k)
-                clean_graphs.append(eq)
-        if clean_graphs:
-            path=download_combined_graph(clean_graphs, out_path="/tmp/combined.jpg")
-            if path:
-                time.sleep(0.5)
-                send_image(jid, path, f"📊 合併圖: {', '.join(clean_graphs)}")
-                expr_list=[{"latex": e, "color": "#c82a54" if i==0 else "#2d70b3"} for i,e in enumerate(clean_graphs)]
-                desmos_url=f"https://www.desmos.com/calculator?expressions_list={urllib.parse.quote(json.dumps(expr_list))}"
-                send_text(jid, f"互動版睇圖:\n{desmos_url}")
+    if is_image_homework:
+        # 1. 紅圈
+        if b64 and mime!="application/pdf" and CROSS in clean_answer:
+            img_b64=create_annotated_image(b64, annotations)
+            if img_b64:
+                time.sleep(0.6)
+                send_image(jid, img_b64, f"{CROSS} 睇圖，紅圈就係錯嘅位")
+
+        # 2. 合併圖 - 分Q出圖
+        if graphs or full_q_graphs:
+            from collections import defaultdict
+            q_map = defaultdict(list)
+            # 處理 Q1: y=x+1 格式
+            for q_label, eq in full_q_graphs:
+                q_map[q_label.upper()].append(eq.strip())
+            # 處理舊格式但冇Q的，當 Q1
+            if graphs and not full_q_graphs:
+                for eq in graphs:
+                    eq=eq.strip().split("|")[0].strip()
+                    if len(eq)>2:
+                        q_map["Q1"].append(eq)
+
+            for q_label, eq_list in q_map.items():
+                uniq=[]
+                seen=set()
+                for e in eq_list:
+                    k=e.replace(" ","")
+                    if k not in seen and len(e)>2:
+                        seen.add(k); uniq.append(e)
+                if not uniq: continue
+                path=download_combined_graph(uniq, out_path=f"/tmp/{q_label}.jpg")
+                if path:
+                    time.sleep(0.5)
+                    send_image(jid, path, f"📊 {q_label} 視像化: {', '.join(uniq)}")
+                    expr_list=[{"latex": e} for e in uniq]
+                    desmos_url=f"https://www.desmos.com/calculator?expressions_list={urllib.parse.quote(json.dumps(expr_list))}"
+                    send_text(jid, f"{q_label} 互動版:\n{desmos_url}")
+    else:
+        if graphs or full_q_graphs:
+            print(f"[SKIP GRAPH+ANNOTATION] PDF/文字功課，唔出圖，避免大拼圖")
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -369,7 +387,7 @@ def webhook():
     return jsonify({"ok": True}), 200
 
 @app.route("/", methods=["GET"])
-def home(): return f"LC Sir GUARANTEED GRAPH {TICK} len={len(GEMINI_API_KEY)}", 200
+def home(): return f"LC Sir FINAL-IMAGE-ONLY {TICK} len={len(GEMINI_API_KEY)}", 200
 @app.route("/health", methods=["GET"])
 def health(): return "ok", 200
 if __name__=="__main__":
