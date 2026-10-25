@@ -6,7 +6,6 @@ EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "").strip().rstrip("/")
 EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
 TEACHER_NUMBERS = ["85246447827"]
-
 STATE_FILE = "/tmp/group_state.json"
 def load_state():
     try:
@@ -21,17 +20,14 @@ def save_state():
             json.dump(GROUP_STATE, f)
     except Exception as e:
         print(f"[SAVE_STATE] err {e}")
-
 GROUP_STATE = load_state()
 SEEN_IDS = {}
 LOCK = threading.Lock()
-
 print(f"BOOT FINAL 3-IN-1 len={len(GEMINI_API_KEY)}")
-
 SYSTEM_PROMPT = """You are LC Sir, Hong Kong DSE Math tutor. Friendly, simple, short, like a real person.
 CRITICAL RULES:
 - NEVER use $ $ or \\frac \\text or ^ or sqrt().
-- MUST use pretty Unicode math only: 次方用 ² ³，開方用 ½ ¼ ¾ 或 ⁄，乘除用 × ÷
+- MUST use pretty Unicode math only: 次方用 ² ³，開方用 √，分數用 ½ ¼ ¾ 或 ⁄，乘除用 × ÷
 - Use *bold* for Q titles, short lines, HK Cantonese口語.
 - No LaTeX ever.
 OUTPUT FORMAT - PDF功課改卷模式:
@@ -51,9 +47,7 @@ GRAPH_EQUATION: 如果有圖就加 y = ...
 最後 💡 總結 2行
 最後一定要加 ANNOTATIONS_JSON: [{"label":"3²計錯","x":0.5,"y":0.4}] x,y係0-1座標。全對就 []
 """
-
-MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-3.5-flash-lite"]
-
+MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.5-flash-lite"]
 def clean_b64(b64):
     if not b64: return None
     b64=b64.strip()
@@ -61,7 +55,6 @@ def clean_b64(b64):
     b64=b64.replace("\n","").replace("\r","").replace(" ","")
     b64+="="*(-len(b64)%4)
     return b64
-
 def get_file_base64(data, is_pdf=False):
     time.sleep(2)
     for attempt in range(5):
@@ -74,9 +67,9 @@ def get_file_base64(data, is_pdf=False):
                 m=re.search(r'"base64"\s*:\s*"([^"]{1000,})"', r.text)
                 raw=m.group(1) if m else None
                 if not raw:
-                    try: 
+                    try:
                         j=r.json()
-                        raw=j.get("base64") or j.get("data", {}).get("base64") if isinstance(j.get("data"), dict) else j.get("data")
+                        raw=j.get("base64") or (j.get("data", {}).get("base64") if isinstance(j.get("data"), dict) else j.get("data"))
                     except: pass
                 b64=clean_b64(raw) if raw else None
                 if b64 and len(b64)>1000:
@@ -87,7 +80,6 @@ def get_file_base64(data, is_pdf=False):
         except Exception as e: print(f"[M1] err {e}")
         if attempt<4: time.sleep(5)
     return None, None
-
 def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
     prompt=SYSTEM_PROMPT+f"\n\n學生: {question}"
     last_error=""
@@ -102,9 +94,9 @@ def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
             if r.status_code==200:
                 return r.json()["candidates"][0]["content"]["parts"][0]["text"], "ok"
             last_error=r.text[:800]
+            print(f"[GEMINI {model} FAIL] {r.status_code} {last_error[:300]}")
         except Exception as e: last_error=str(e)
     return f"Error: {last_error}", "error"
-
 def send_typing(jid, stop_event):
     url = f"{EVOLUTION_API_URL}/chat/sendPresence/{EVOLUTION_INSTANCE}"
     headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
@@ -115,7 +107,6 @@ def send_typing(jid, stop_event):
         for _ in range(25):
             if stop_event.is_set(): break
             time.sleep(0.1)
-
 def send_text(jid, text):
     url=f"{EVOLUTION_API_URL}/message/sendText/{EVOLUTION_INSTANCE}"
     headers={"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
@@ -124,12 +115,10 @@ def send_text(jid, text):
             requests.post(url, json={"number": jid, "text": text[i:i+3000]}, headers=headers, timeout=20)
             time.sleep(0.5)
     except Exception as e: print(f"Send fail {e}")
-
-# ===== 功能1: 紅圈原圖 =====
 def create_annotated_image(original_b64, annotations):
     try:
-        print(f"[ANNOTATE] start len={len(original_b64)} ann={annotations}")
-        from PIL import Image, ImageDraw, ImageFont
+        print(f"[ANNOTATE] start ann={annotations}")
+        from PIL import Image, ImageDraw
         img_data = base64.b64decode(clean_b64(original_b64))
         img = Image.open(io.BytesIO(img_data)).convert("RGB")
         draw = ImageDraw.Draw(img)
@@ -146,88 +135,85 @@ def create_annotated_image(original_b64, annotations):
                     draw.rectangle([cx-r, cy+r+5, cx+r+100, cy+r+35], fill="white", outline="red", width=2)
                     draw.text((cx-r+5, cy+r+8), label, fill="red")
                 except: continue
-        out_path = "/tmp/annotated.jpg"
-        img.save(out_path, "JPEG", quality=92)
-        with open(out_path, "rb") as f:
-            b64_out = base64.b64encode(f.read()).decode()
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=92)
+        b64_out = base64.b64encode(buf.getvalue()).decode()
         print(f"[ANNOTATE] done len={len(b64_out)}")
         return b64_out
     except Exception as e:
         print(f"[ANNOTATE ERR] {e}"); return None
-
 def send_image(jid, image_input, caption):
-    # image_input 可以係路徑 /tmp/xxx.jpg 或者 base64
     try:
         b64_data = None
         if isinstance(image_input, str) and os.path.exists(image_input):
             with open(image_input, "rb") as f:
                 b64_data = base64.b64encode(f.read()).decode()
-            print(f"[SEND IMAGE] from path {image_input} -> b64 len={len(b64_data)}")
         else:
             b64_data = clean_b64(image_input)
-        
         if not b64_data or len(b64_data) < 1000:
-            print(f"[SEND IMAGE] invalid b64 len")
-            return False
-
-        # 試法 1: JSON base64
+            print(f"[SEND IMAGE] invalid b64"); return False
         url = f"{EVOLUTION_API_URL}/message/sendMedia/{EVOLUTION_INSTANCE}"
         headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
-        payload = {
-            "number": jid,
-            "mediatype": "image",
-            "media": b64_data,
-            "caption": caption,
-            "fileName": "marked.jpg"
-        }
+        payload = {"number": jid, "mediatype": "image", "media": b64_data, "caption": caption, "fileName": "marked.jpg"}
         r = requests.post(url, json=payload, headers=headers, timeout=30)
         print(f"[SEND IMAGE 1] {r.status_code} {r.text[:500]}")
         if r.status_code in [200, 201]:
             return True
-
-        # 試法 2: form-data
         img_bytes = base64.b64decode(b64_data)
         files = {"media": ("marked.jpg", io.BytesIO(img_bytes), "image/jpeg")}
         data = {"number": jid, "mediatype": "image", "caption": caption, "fileName": "marked.jpg"}
-        headers2 = {"apikey": EVOLUTION_API_KEY}
-        r2 = requests.post(url, headers=headers2, data=data, files=files, timeout=30)
+        r2 = requests.post(url, headers={"apikey": EVOLUTION_API_KEY}, data=data, files=files, timeout=30)
         print(f"[SEND IMAGE 2] {r2.status_code} {r2.text[:500]}")
         return r2.status_code in [200, 201]
     except Exception as e:
-        print(f"[SEND IMAGE ERR] {e}")
-        return False
-
-# ===== 功能2: 網上下載函數圖 =====
+        print(f"[SEND IMAGE ERR] {e}"); return False
 def download_graph_from_api(equation_str, out_path="/tmp/graph.jpg"):
     try:
         import numpy as np
-        eq = equation_str.replace("y=","").replace("y =","").strip()
-        eq_py = eq.replace("^","**").replace("²","**2").replace("³","**3")
-        xs = list(np.linspace(-10, 10, 60))
-        ys = []
-        for xv in xs:
+        eq_raw = equation_str.strip()
+        is_circle = False
+        h = k = r_val = None
+        circ_match = re.search(r'\(x\s*([+-]\s*\d*\.?\d+)?\)\s*\^?2?²?\s*\+\s*\(y\s*([+-]\s*\d*\.?\d+)?\)\s*\^?2?²?\s*=\s*(\d+\.?\d*)', eq_raw.replace(" ", ""))
+        if circ_match:
             try:
-                yv = eval(eq_py, {"x": xv, "np": np, "sin": np.sin, "cos": np.cos, "sqrt": np.sqrt, "log": np.log, "exp": np.exp})
-                ys.append(float(yv) if abs(float(yv)) < 500 else None)
-            except: ys.append(None)
+                h_str = (circ_match.group(1) or "0").replace(" ", "")
+                k_str = (circ_match.group(2) or "0").replace(" ", "")
+                h = -float(h_str) if h_str else 0
+                k = -float(k_str) if k_str else 0
+                r_val = float(circ_match.group(3))**0.5
+                is_circle = True
+            except: pass
+        points = []
+        if is_circle:
+            for th in np.linspace(0, 2*np.pi, 150):
+                points.append({"x": float(h + r_val*np.cos(th)), "y": float(k + r_val*np.sin(th))})
+        else:
+            eq = eq_raw.replace("y=","").replace("y =","").strip()
+            eq_py = eq.replace("^","**").replace("²","**2").replace("³","**3")
+            for xv in np.linspace(-10, 10, 200):
+                try:
+                    yv = eval(eq_py, {"x": float(xv), "np": np, "sin": np.sin, "cos": np.cos, "sqrt": np.sqrt, "log": np.log, "exp": np.exp, "tan": np.tan})
+                    if yv is not None and abs(float(yv)) < 100:
+                        points.append({"x": float(xv), "y": float(yv)})
+                except: pass
         chart_config = {
-            "type": "line",
-            "data": {
-                "labels": xs,
-                "datasets": [{"label": equation_str, "data": ys, "fill": False, "borderColor": "red", "pointRadius": 0, "borderWidth": 2}]
-            },
-            "options": {"title": {"display": True, "text": equation_str}}
+            "type": "scatter",
+            "data": {"datasets": [{"label": eq_raw, "data": points, "showLine": True, "fill": False, "borderColor": "#e11d48", "backgroundColor": "#e11d48", "pointRadius": 0, "borderWidth": 3}]},
+            "options": {
+                "title": {"display": True, "text": eq_raw, "fontSize": 16},
+                "scales": {"x": {"type": "linear", "position": "bottom"}, "y": {}},
+                "legend": {"display": False}
+            }
         }
-        url = f"https://quickchart.io/chart?c={urllib.parse.quote(json.dumps(chart_config))}&width=600&height=400&backgroundColor=white"
+        url = f"https://quickchart.io/chart?c={urllib.parse.quote(json.dumps(chart_config))}&width=700&height=500&backgroundColor=white&devicePixelRatio=2"
         r = requests.get(url, timeout=25)
-        if r.status_code == 200 and len(r.content) > 5000:
+        if r.status_code == 200 and len(r.content) > 3000:
             with open(out_path, "wb") as f: f.write(r.content)
-            print(f"[GRAPH DL OK] {eq}")
+            print(f"[GRAPH DL OK] {eq_raw}")
             return out_path
     except Exception as e:
         print(f"[GRAPH DL ERR] {e} eq={equation_str}")
     return None
-
 def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
     with LOCK:
         now=time.time()
@@ -236,15 +222,12 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
         if msg_id in SEEN_IDS:
             print(f"[SKIP AUTO-DUP] {msg_id}"); return
         SEEN_IDS[msg_id]=now
-
     stop_typing = threading.Event()
     threading.Thread(target=send_typing, args=(jid, stop_typing), daemon=True).start()
-
     def is_teacher_user():
         if from_me: return True
         digits=re.sub(r'\D','', participant if "@g.us" in jid else jid)
         return any(t in digits for t in TEACHER_NUMBERS)
-
     is_group="@g.us" in jid
     if is_group:
         if jid not in GROUP_STATE:
@@ -269,7 +252,6 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
                     if any(k in low for k in ["lc","sir","老師"]):
                         send_text(jid, "⏳ 而家未開放提問，等老師講「開始提問」先可以問 LC Sir 呀～")
                     return
-
     if from_me and not is_group:
         stop_typing.set(); return
     if from_me and "@g.us" in jid:
@@ -281,7 +263,6 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
             if not msg.get("imageMessage", {}).get("caption"):
                 stop_typing.set(); return
         text=f"[{push_name} 問]: {text}"
-
     b64,mime=None,"image/jpeg"
     if "imageMessage" in msg:
         b64,mime=get_file_base64(data, is_pdf=False)
@@ -297,31 +278,24 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
         stop_typing.set()
         send_text(jid, "張圖仲 load 緊，麻煩 send 多次新相，唔好 forward 舊相 🙏")
         return
-
     answer,_=call_gemini(text, b64, mime)
     stop_typing.set()
-
     annotations = []
     m_ann = re.search(r"ANNOTATIONS_JSON:\s*(\[.*?\])", answer, re.DOTALL)
     if m_ann:
         try: annotations = json.loads(m_ann.group(1))
         except: pass
-
     graphs=re.findall(r"GRAPH_EQUATION:\s*(.+)", answer)
     clean_answer=re.sub(r"GRAPH_EQUATION:\s*.+", "", answer).strip()
     clean_answer=re.sub(r"ANNOTATIONS_JSON:.*", "", clean_answer, flags=re.DOTALL).strip()
     if is_group and push_name: clean_answer=f"@{push_name} {clean_answer}"
     send_text(jid, clean_answer)
-
-    # 1. 紅圈原圖
     if b64 and mime != "application/pdf":
         if "❌" in clean_answer or annotations:
             img_b64 = create_annotated_image(b64, annotations)
             if img_b64:
                 time.sleep(0.8)
                 send_image(jid, img_b64, f"@{push_name} 睇圖，紅圈就係錯嘅位")
-
-    # 2. 函數圖
     if graphs:
         time.sleep(0.8)
         for idx, eq in enumerate(graphs):
@@ -334,7 +308,6 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
             geogebra=f"https://www.geogebra.org/graphing?lang=en&command={urllib.parse.quote(eq)}"
             send_text(jid, f"📊 {eq} 互動版\n👉 Desmos: {desmos}\n👉 GeoGebra: {geogebra}")
             time.sleep(0.5)
-
 @app.route("/webhook", methods=["POST"])
 def webhook():
     body=request.json or {}
@@ -352,7 +325,6 @@ def webhook():
     print(f"[IN] id={msg_id} fromMe={from_me} jid={jid} text={text[:80]}")
     threading.Thread(target=do_work, args=(jid, text, push_name, participant, from_me, msg, data, msg_id), daemon=True).start()
     return jsonify({"ok": True}), 200
-
 @app.route("/", methods=["GET"])
 def home(): return f"LC Sir 3-IN-1 len={len(GEMINI_API_KEY)}", 200
 @app.route("/health", methods=["GET"])
