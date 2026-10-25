@@ -147,17 +147,41 @@ def create_annotated_image(original_b64, annotations):
     except Exception as e:
         print(f"[ANNOTATE ERR] {e}"); return None
 
-def send_image(jid, image_path, caption):
+def send_image(jid, image_b64, caption):
+    # 試法 1: JSON base64 (新版 Evolution 用呢個)
     try:
         url = f"{EVOLUTION_API_URL}/message/sendMedia/{EVOLUTION_INSTANCE}"
-        headers = {"apikey": EVOLUTION_API_KEY}
-        with open(image_path, "rb") as f:
-            files = {"media": (os.path.basename(image_path), f, "image/jpeg")}
-            data = {"number": jid, "mediatype": "image", "caption": caption, "fileName": os.path.basename(image_path)}
-            r = requests.post(url, headers=headers, data=data, files=files, timeout=40)
-            print(f"[SEND IMAGE] {r.status_code}")
+        headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
+        # 確保冇 data:image 前綴
+        if "," in image_b64[:100]: image_b64 = image_b64.split(",")[-1]
+        payload = {
+            "number": jid,
+            "mediatype": "image",
+            "media": image_b64,
+            "caption": caption,
+            "fileName": "marked.jpg"
+        }
+        r = requests.post(url, json=payload, headers=headers, timeout=30)
+        print(f"[SEND IMAGE 1] {r.status_code} {r.text[:500]}")
+        if r.status_code in [200, 201]:
+            return True
     except Exception as e:
-        print(f"[SEND IMAGE ERR] {e}")
+        print(f"[SEND IMAGE 1 ERR] {e}")
+
+    # 試法 2: form-data upload (舊版)
+    try:
+        import io
+        url = f"{EVOLUTION_API_URL}/message/sendMedia/{EVOLUTION_INSTANCE}"
+        headers = {"apikey": EVOLUTION_API_KEY}
+        img_bytes = base64.b64decode(image_b64)
+        files = {"media": ("marked.jpg", io.BytesIO(img_bytes), "image/jpeg")}
+        data = {"number": jid, "mediatype": "image", "caption": caption, "fileName": "marked.jpg"}
+        r = requests.post(url, headers=headers, data=data, files=files, timeout=30)
+        print(f"[SEND IMAGE 2] {r.status_code} {r.text[:500]}")
+        return r.status_code in [200, 201]
+    except Exception as e:
+        print(f"[SEND IMAGE 2 ERR] {e}")
+        return False
 
 # ===== 功能2: 網上下載函數圖 (唔用 matplotlib) =====
 def download_graph_from_api(equation_str, out_path="/tmp/graph.jpg"):
