@@ -137,6 +137,7 @@ def send_image(jid, image_input, caption):
         return r2.status_code in [200, 201]
     except Exception as e:
         print(f"[SEND IMAGE ERR] {e}"); return False
+
 def download_graph_from_api(equation_str, out_path="/tmp/graph.jpg"):
     try:
         import numpy as np, sympy as sp
@@ -165,36 +166,21 @@ def download_graph_from_api(equation_str, out_path="/tmp/graph.jpg"):
             return None
         chart_config = {
             "type": "scatter",
-            "data": {
-                "datasets": [{
-                    "label": eq_raw_clean,
-                    "data": points,
-                    "showLine": True,
-                    "fill": False,
-                    "borderColor": "rgb(225,29,72)",
-                    "backgroundColor": "rgb(225,29,72)",
-                    "borderWidth": 4,
-                    "pointRadius": 0,
-                    "lineTension": 0
-                }]
-            },
-            "options": {
-                "title": {"display": True, "text": eq_raw_clean, "fontSize": 18},
-                "legend": {"display": False},
-                "scales": {
-                    "xAxes": [{"type": "linear", "position": "bottom", "ticks": {"min": -10, "max": 10}, "gridLines": {"color": "#ddd"}}],
-                    "yAxes": [{"ticks": {"min": -10, "max": 10}, "gridLines": {"color": "#ddd"}}]
-                }
-            }
+            "data": {"datasets": [{"label": eq_raw_clean,"data": points,"showLine": True,"fill": False,"borderColor": "rgb(225,29,72)","backgroundColor": "rgb(225,29,72)","borderWidth": 4,"pointRadius": 0,"lineTension": 0}]},
+            "options": {"title": {"display": True, "text": eq_raw_clean, "fontSize": 18},"legend": {"display": False},"scales": {"xAxes": [{"type": "linear", "position": "bottom", "ticks": {"min": -10, "max": 10}, "gridLines": {"color": "#ddd"}}],"yAxes": [{"ticks": {"min": -10, "max": 10}, "gridLines": {"color": "#ddd"}}]}}
         }
         url = f"https://quickchart.io/chart?c={urllib.parse.quote(json.dumps(chart_config))}&width=700&height=550&backgroundColor=white&devicePixelRatio=2&format=jpg"
         r = requests.get(url, timeout=25)
-        if r.status_code == 200 and len(r.content) > 1500:  # 放鬆，由4000改1500
+        if r.status_code == 200 and len(r.content) > 1500:
             with open(out_path, "wb") as f: f.write(r.content)
-            print(f"[COMBINED OK] saved {len(r.content)} bytes")
+            print(f"[GRAPH OK] saved {len(r.content)} bytes")
             return out_path
         else:
-            print(f"[COMBINED FAIL] status={r.status_code} len={len(r.content) if r.content else 0}")
+            print(f"[GRAPH FAIL] status={r.status_code} len={len(r.content) if r.content else 0}")
+    except Exception as e:
+        print(f"[GRAPH ERR] {e}")
+    return None
+
 def download_combined_graph(equations_list, out_path="/tmp/combined.jpg"):
     try:
         import numpy as np, sympy as sp
@@ -221,40 +207,23 @@ def download_combined_graph(equations_list, out_path="/tmp/combined.jpg"):
             except Exception as e:
                 print(f"[COMBINED SYMPY ERR] {e}")
             if points:
-                datasets.append({
-                    "label": eq_raw_clean,
-                    "data": points,
-                    "showLine": True,
-                    "fill": False,
-                    "borderColor": colors[idx % len(colors)],
-                    "backgroundColor": colors[idx % len(colors)],
-                    "borderWidth": 3,
-                    "pointRadius": 0,
-                    "lineTension": 0
-                })
+                datasets.append({"label": eq_raw_clean,"data": points,"showLine": True,"fill": False,"borderColor": colors[idx % len(colors)],"backgroundColor": colors[idx % len(colors)],"borderWidth": 3,"pointRadius": 0,"lineTension": 0})
         if not datasets:
             return None
-        chart_config = {
-            "type": "scatter",
-            "data": {"datasets": datasets},
-            "options": {
-                "title": {"display": True, "text": " + ".join(equations_list)[:80], "fontSize": 16},
-                "legend": {"display": True, "position": "bottom"},
-                "scales": {
-                    "xAxes": [{"type": "linear", "position": "bottom", "ticks": {"min": -10, "max": 10}, "gridLines": {"color": "#ddd"}}],
-                    "yAxes": [{"ticks": {"min": -10, "max": 10}, "gridLines": {"color": "#ddd"}}]
-                }
-            }
-        }
+        chart_config = {"type": "scatter","data": {"datasets": datasets},"options": {"title": {"display": True, "text": " + ".join(equations_list)[:80], "fontSize": 16},"legend": {"display": True, "position": "bottom"},"scales": {"xAxes": [{"type": "linear", "position": "bottom", "ticks": {"min": -10, "max": 10}, "gridLines": {"color": "#ddd"}}],"yAxes": [{"ticks": {"min": -10, "max": 10}, "gridLines": {"color": "#ddd"}}]}}}
         url = f"https://quickchart.io/chart?c={urllib.parse.quote(json.dumps(chart_config))}&width=800&height=600&backgroundColor=white&devicePixelRatio=2&format=jpg"
         r = requests.get(url, timeout=25)
-        print(f"[COMBINED] status={r.status_code} len={len(r.content)}")
-        if r.status_code == 200 and len(r.content) > 4000:
+        print(f"[COMBINED] status={r.status_code} len={len(r.content) if hasattr(r,'content') else 0}")
+        if r.status_code == 200 and len(r.content) > 1500:
             with open(out_path, "wb") as f: f.write(r.content)
+            print(f"[COMBINED OK] len={len(r.content)}")
             return out_path
+        else:
+            print(f"[COMBINED FAIL] status={r.status_code}")
     except Exception as e:
         print(f"[COMBINED ERR] {e}")
     return None
+
 def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
     with LOCK:
         now=time.time()
@@ -311,16 +280,21 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
     graphs = re.findall(r"GRAPH_EQUATION:\s*(.+)", answer)
     if not graphs:
         combined = text + " " + answer
-        found = re.findall(r'x\s*[\+\-]\s*\d*y\s*[\+\-]\s*\d+\s*=\s*0|\d*x\s*[\+\-]\s*y\s*[\+\-]\s*\d+\s*=\s*0', combined)
+        print(f"[GRAPH DEBUG] combined len {len(combined)}")
+        patterns = [r'[L₁L₂L12]\s*[:：]?\s*(x\s*[\+\-]\s*\d*y\s*[\+\-]\s*\d+\s*=\s*0)', r'[L₁L₂L12]\s*[:：]?\s*(\d*x\s*[\+\-]\s*y\s*[\+\-]\s*\d+\s*=\s*0)', r'(x\s*-\s*2y\s*\+\s*9\s*=\s*0)', r'(3x\s*\+\s*y\s*-\s*8\s*=\s*0)', r'(x\s*[\+\-]\s*\d*y\s*[\+\-]\s*\d+\s*=\s*0)', r'(\d*x\s*[\+\-]\s*y\s*[\+\-]\s*\d+\s*=\s*0)']
+        found_raw=[]
+        for pat in patterns:
+            found_raw+=re.findall(pat, combined, flags=re.IGNORECASE)
         seen=set()
-        for f in found:
-            ff=f.replace(" ","")
-            if ff not in seen:
-                seen.add(ff)
-                graphs.append(f)
-        extra = re.findall(r'x\s*-\s*2y\s*\+\s*9\s*=\s*0|3x\s*\+\s*y\s*-\s*8\s*=\s*0', combined)
-        for f in extra:
-            if f not in graphs: graphs.append(f)
+        for f in found_raw:
+            if isinstance(f, tuple): f="".join(f)
+            ff=f.strip().replace("：",":").split(":")[-1].strip()
+            if not ff: continue
+            k=ff.replace(" ","")
+            if k not in seen and len(ff)>3:
+                seen.add(k)
+                graphs.append(ff)
+                print(f"[GRAPH DETECTED] {ff}")
     clean_answer=re.sub(r"GRAPH_EQUATION:\s*.+", "", answer).strip()
     clean_answer=re.sub(r"ANNOTATIONS_JSON:.*", "", clean_answer, flags=re.DOTALL).strip()
     if is_group and push_name: clean_answer=f"@{push_name} {clean_answer}"
@@ -340,6 +314,7 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
             if k not in seen_eq:
                 seen_eq.add(k)
                 clean_graphs.append(eq)
+        print(f"[GRAPH FINAL LIST] {clean_graphs}")
         if clean_graphs:
             if len(clean_graphs) > 1:
                 combined_path = download_combined_graph(clean_graphs, out_path="/tmp/combined.jpg")
