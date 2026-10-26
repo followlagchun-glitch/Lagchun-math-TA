@@ -1,5 +1,5 @@
-# LC SIR V10.1-HANDWRITTEN-REAL - 真手寫細字成長版 2026-10-26
-# 基於 V10 母體進化：圈準 + 細字 + 真手寫抖動
+# LC SIR V10.2-REAL-HANDWRITE-NO-DESMOS - V10.1 進化版
+# Fix: 批改功課唔出Desmos + 真手寫斜體 + 廣東話+英文
 from flask import Flask, request, jsonify
 import os, requests, re, urllib.parse, base64, time, json, threading, io, random
 app = Flask(__name__)
@@ -9,9 +9,10 @@ EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
 TEACHER_NUMBERS = ["85246447827"]
 
-VERSION = "V10.1-REAL-HANDWRITE-SMALL"
+VERSION = "V10.2-CANTONESE-HANDWRITE-NODESMOS"
 STATE_FILE = "/tmp/group_state.json"
 MEMORY_FILE = "/tmp/lc_memory.json"
+ENABLE_GRAPH_FOR_HOMEWORK = False  # 力 Sir 要求：改功課唔出 Desmos
 
 def load_state():
     try:
@@ -52,62 +53,39 @@ ENABLE_COMMENTS = True
 print(f"BOOT {VERSION} len={len(GEMINI_API_KEY)} mem={len(LC_MEMORY)}")
 
 SYSTEM_PROMPT = """
-You are LC Sir, Hong Kong DSE Math 專家，團隊 LC Math，10年經驗。Friendly, HK Cantonese。
+You are LC Sir, Hong Kong DSE Math 專家，團隊 LC Math，10年經驗。Friendly, HK Cantonese + English term。
 === 鐵律0：絕對一致性 ===
-- 判斷只有一次，一開頭話 ❌，成段都要保持係 ❌，唔可以中途話其實啱
-- 一開頭話 ✅，成段都要讚，唔可以後面又話錯
-- 禁止出現「等等...」「哎呀」「其實又啱」「不過」呢類自我推翻字眼
-- 計數前先諗好，計啱 11.1% 就係 11.1%，唔好一陣話錯一陣話啱
+- 判斷只有一次，一開頭話 ❌，成段都要保持係 ❌
+- 禁止「等等...」「其實又啱」「不過」
 
 鐵律2.5：分數寫法
-- 如果答案係 11又1/9% 或 11.1% 都當 ✅，唔好挑剔格式，除非真係計錯數 
+- 11又1/9% 或 11.1% 都當 ✅
+
 === 鐵律1：NEVER LATEX ===
 - NEVER用 $ $ $$ $$ \\( \\) \\[ \\] \\frac \\text \\sqrt \\^
 - 只能用靚Unicode：² ³ √ ½ ¼ ¾ × ÷
-- y = (x+9)/2, h² = 100 - 9 = 91, h = √91
 
-=== 鐵律2：繁體廣東話 ===
-- MUST繁體中文ONLY，口語：係, 唔係, 睇下, 呢題
+=== 鐵律2：廣東話+英文術語 ===
+- MUST繁體廣東話為主，technical term用英文：vertex, inequality, region, boundary, k value
+- 例：呢度k≤0 錯咗，check vertex (0,0) 就知
 - NEVER簡體
 
 === 鐵律3：一開頭定生死 ===
 - 改功課模式，每條Q第一行必須直接講結果
-- 錯：Q1 ❌ 呢題唔啱，答錯咗！
-- 啱：Q1 ✅ 呢題啱晒！肯定啱！DSE滿分Level！YA
+- 錯：Q33 ❌ 呢題唔啱，k≤0錯咗
+- 啱：Q33 ✅ 呢題啱晒！
 
 === 鐵律4：分題出圖，標明Q ===
-- 只要見到 x,y 方程，直線，二次，必須標明Q
+- 問問題模式先可以出 GRAPH_EQUATION，改功課模式唔出圖
 - 格式：GRAPH_EQUATION Q1: y=x+1
-- 有兩條同Q： GRAPH_EQUATION Q1: y=x+1 和 GRAPH_EQUATION Q1: y=-2x+4 會合併
-- 唔同Q分開出，禁止大拼圖
 
-=== 鐵律5：紅圈+藍字批改 ===
-- 有錯就出：ANNOTATIONS_JSON: [{"x":0.42,"y":0.35,"text":"h<=4-9 no, check x=0"}]
-- text必須係英文+數字+符號，ASCII ONLY，嚴禁√ ² 等符號，用 sqrt 代替√，30字內，越短越好，似老師手寫
+=== 鐵律5：紅圈+藍字批改 - 真手寫廣東話 ===
+- 有錯就出：ANNOTATIONS_JSON: [{"x":0.52,"y":0.41,"text":"k<=0 錯，x=0 check vertex"}]
+- text必須係 廣東話+英文term，15字內，越短越好，ASCII為主
+- 例子：k<=8 錯，試 (0,0) / II, III 錯，region睇錯邊
 
-=== 鐵律6：PDF一定要改晒所有題，死命令 ===
-- 如果收到PDF有5頁，入面有Q1 Q2 Q3 Q4 Q5，你必須由Q1改到Q5，一題都唔可以漏！
-- 淨係改Q4 Q5係嚴重失敗！
-- 格式：一定要每題獨立一段，Q1... Q2... Q3...
-- 就算啱晒都要寫 Q1 ✅ 呢題啱晒！唔可以skip
-- 如果真係有10題，每題簡短啲都要寫晒
-
-分兩個模式：
-模式A - 問問題 (冇手寫)：
-*題目拆解*：DSE咩課題
-*DSE概念*：考咩
-*技巧*：點諗
-*點做*：1. 2.
-*答案*：...
-💡 DSE伏位
-GRAPH_EQUATION Q1: ...
-
-模式B - 改功課 (有手寫) - 必須改晒所有題：
-- PDF有幾多題，就要由Q1改到最後一題，一題都唔可以漏！
-- 如果見到 Q1,Q2,Q3,Q4,Q5，就要逐條出：
-Q1 ✅ ...
-Q2 ❌ ...
-Q3 ✅ ...
+=== 鐵律6：PDF一定要改晒所有題 ===
+- 有幾多題改幾多題，唔可以skip
 """
 
 MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash", "gemini-3.5-flash-lite"]
@@ -192,27 +170,32 @@ def create_annotated_image(original_b64, annotations):
         draw=ImageDraw.Draw(img)
         w,h=img.size
         if not annotations: return None
-
-        # V10.1 核心：真手寫 + 細字
         try:
-            # 用 DejaVu 但加手寫抖動算法，模擬手寫
-            font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-            font_size = int(h*0.024)  # 細返！之前0.068而家0.024
-            font = ImageFont.truetype(font_path, font_size)
+            # 搵斜體，似手寫
+            candidates = [
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+            ]
+            font_path = None
+            for p in candidates:
+                if os.path.exists(p):
+                    font_path = p; break
+            font_size = int(h*0.022)  # 再細啲，唔遮圖
+            font = ImageFont.truetype(font_path, font_size) if font_path else ImageFont.load_default()
         except:
             font = ImageFont.load_default()
-            font_size = 22
+            font_size = 20
 
-        def draw_handwriting_text(x, y, text, fill=(15,40,160)):
-            # 真手寫效果：每個字隨機偏移1-2px，似人手寫
+        def draw_handwrite(x, y, text):
+            # 真手寫：藍色原子筆 + 抖動 + 輕微斜
             cur_x = x
             for ch in text:
-                jitter_x = random.randint(-1,1)
-                jitter_y = random.randint(-1,1)
-                draw.text((cur_x+jitter_x, y+jitter_y), ch, fill=fill, font=font)
-                # 計字寬
-                bbox = draw.textbbox((0,0), ch, font=font)
-                cur_x += (bbox[2]-bbox[0]) - 1
+                jx = random.randint(-1,1)
+                jy = random.randint(-1,1)
+                # 筆壓深淺
+                draw.text((cur_x+jx, y+jy), ch, fill=(20,60,160), font=font)
+                bw = draw.textbbox((0,0), ch, font=font)
+                cur_x += (bw[2]-bw[0]) * 0.92
 
         for ann in annotations[:3]:
             try:
@@ -220,32 +203,26 @@ def create_annotated_image(original_b64, annotations):
                 raw_txt=ann.get("text","").strip()
                 if not (0.02 < x < 0.98 and 0.02 < y < 0.98): continue
                 cx,cy=int(w*x),int(h*y)
-                # 圈細同準：0.04，唔疊
-                r=int(min(w,h)*0.042)
-                # 手畫圈效果：畫兩次有少少偏移
-                draw.ellipse([cx-r-3,cy-r-2,cx+r+3,cy+r+2], outline=(255,220,0), width=3)
-                draw.ellipse([cx-r,cy-r,cx+r,cy+r], outline=(210,0,0), width=3)
+                r=int(min(w,h)*0.038)  # 更準更細
+                # 手畫紅圈，唔係完美圓
+                for i in range(2):
+                    ox = random.randint(-2,2); oy = random.randint(-2,2)
+                    draw.ellipse([cx-r+ox,cy-r+oy,cx+r+ox,cy+r+oy], outline=(220,0,0), width=3)
 
                 if raw_txt and ENABLE_COMMENTS:
-                    txt = raw_txt.replace("√","sqrt").replace("²","^2").replace("×","*").replace("，",",")
-                    txt = ''.join(c for c in txt if ord(c) < 128)[:40].strip()
+                    txt = raw_txt.replace("√","sqrt").replace("²","^2")[:35].strip()
+                    txt = ''.join(c for c in txt if ord(c) < 128 or '\u4e00' <= c <= '\u9fff')[:35]
                     if not txt: continue
-
-                    # 貼近圈，細字
-                    tx = cx + r + 10
-                    ty = cy - r - 8
-                    if tx + 200 > w: tx = cx - r - 180
-                    if ty < 10: ty = cy + r + 8
-                    if tx < 10: tx = 10
-
-                    # 底：半透明白底，唔遮圖
+                    tx = cx + r + 8
+                    ty = cy - 5
+                    if tx + 180 > w: tx = max(5, cx - r - 160)
+                    if ty < 5: ty = cy + r + 5
                     bbox = draw.textbbox((tx,ty), txt, font=font)
-                    pad=6
-                    draw.rounded_rectangle([bbox[0]-pad, bbox[1]-pad, bbox[2]+pad, bbox[3]+pad], radius=6, fill=(255,255,255,220), outline=(50,100,200), width=1)
-                    draw_handwriting_text(tx, ty, txt)
-
-            except Exception as e:
-                print(f"[ANN] {e}"); continue
+                    pad=5
+                    # 白底，唔搶眼
+                    draw.rounded_rectangle([bbox[0]-pad, bbox[1]-pad-1, bbox[2]+pad, bbox[3]+pad+1], radius=5, fill=(255,255,255,230), outline=(80,120,200), width=1)
+                    draw_handwrite(tx, ty, txt)
+            except: continue
 
         buf=io.BytesIO()
         img.save(buf,"JPEG",quality=92)
@@ -383,13 +360,40 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
             LC_MEMORY.append({"t":int(time.time()), "q":text[:200], "a":clean_answer[:300], "jid":jid})
             save_memory(LC_MEMORY)
     except: pass
+
     is_image_homework = is_image_msg
     if is_image_homework:
+        # V10.2: 改功課唔出 Desmos
+        if not ENABLE_GRAPH_FOR_HOMEWORK:
+            print(f"[SKIP DESMOS] Homework mode, no graph")
         if b64 and mime!="application/pdf" and CROSS in clean_answer:
             img_b64=create_annotated_image(b64, annotations)
             if img_b64:
                 time.sleep(0.6)
                 send_image(jid, img_b64, f"{CROSS} 睇圖，紅圈就係錯嘅位")
+        # 只有問問題先出圖，改功課唔出
+        if ENABLE_GRAPH_FOR_HOMEWORK and (graphs or full_q_graphs):
+            from collections import defaultdict
+            q_map = defaultdict(list)
+            for q_label, eq in full_q_graphs:
+                q_map[q_label.upper()].append(eq.strip())
+            if graphs and not full_q_graphs:
+                for eq in graphs:
+                    eq=eq.strip().split("|")[0].strip()
+                    if len(eq)>2: q_map["Q1"].append(eq)
+            for q_label, eq_list in q_map.items():
+                uniq=[]; seen=set()
+                for e in eq_list:
+                    k=e.replace(" ","")
+                    if k not in seen and len(e)>2:
+                        seen.add(k); uniq.append(e)
+                if not uniq: continue
+                path=download_combined_graph(uniq, out_path=f"/tmp/{q_label}.jpg")
+                if path:
+                    time.sleep(0.5)
+                    send_image(jid, path, f"📊 {q_label} 視像化: {', '.join(uniq)}")
+    else:
+        # 文字問問題先出 Desmos
         if graphs or full_q_graphs:
             from collections import defaultdict
             q_map = defaultdict(list)
@@ -432,7 +436,7 @@ def webhook():
     return jsonify({"ok": True}), 200
 
 @app.route("/", methods=["GET"])
-def home(): return f"LC Sir {VERSION} {TICK} mem={len(LC_MEMORY)} len={len(GEMINI_API_KEY)}", 200
+def home(): return f"LC Sir {VERSION} {TICK} mem={len(LC_MEMORY)}", 200
 @app.route("/health", methods=["GET"])
 def health(): return "ok", 200
 @app.route("/memory", methods=["GET"])
