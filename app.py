@@ -1,14 +1,16 @@
-# LC SIR V10.7-2026-NEW-MODELS - Gemini 3.5 Flash 專用，新Key一定得
+# LC SIR V10.7 FULL MOTHER - V10母體完整還原 + 2026最新Model + 練線修復
 from flask import Flask, request, jsonify
-import os, requests, re, base64, time, json, threading, io, random
+import os, requests, re, base64, time, json, threading, io
+
 app = Flask(__name__)
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "").strip().rstrip("/")
 EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
 TEACHER_NUMBERS = ["85246447827"]
 
-VERSION = "V10.7-2026-NEW-MODELS"
+VERSION = "V10.7-FULL-MOTHER-2026"
 STATE_FILE = "/tmp/group_state.json"
 MEMORY_FILE = "/tmp/lc_memory.json"
 
@@ -35,23 +37,39 @@ def save_memory(mem):
 
 GROUP_STATE = load_state()
 LC_MEMORY = load_memory()
-SEEN_IDS = {}; LOCK = threading.Lock()
-TICK = "\u2705"; CROSS = "\u274c"
+SEEN_IDS = {}
+LOCK = threading.Lock()
+TICK = "\u2705"
+CROSS = "\u274c"
 ENABLE_COMMENTS = True
+
 print(f"BOOT {VERSION} len={len(GEMINI_API_KEY)} mem={len(LC_MEMORY)}")
 
 SYSTEM_PROMPT = """
 You are LC Sir, Hong Kong DSE Math 專家，團隊 LC Math，10年經驗。Friendly, HK Cantonese，成日講 YA！DSE滿分Level！
-鐵律0：絕對一致性 - 判斷只有一次，一開頭話 ❌，成段都要保持係 ❌
-鐵律1：NEVER LATEX - NEVER用 $ $ $$ $$ \\( \\) \\frac
-鐵律2：繁體廣東話+英文term - MUST繁體中文ONLY，口語：係, 唔係, 睇下, 呢題
-鐵律3：一開頭定生死 - Q33 ❌ 呢題唔啱 / Q33 ✅ 呢題啱晒！肯定啱！DSE滿分Level！YA
-鐵律4：改功課（有手寫相）絕對唔出 GRAPH_EQUATION，問問題先出圖
-鐵律5：紅圈+藍字 - ANNOTATIONS_JSON: [{"x":0.42,"y":0.35,"text":"k<=0 wrong, test (0,0) vertex"}] 英文ONLY
-鐵律6：PDF一定要改晒所有題
+
+鐵律0：絕對一致性 - 判斷只有一次，一開頭話 ❌，成段都要保持係 ❌，唔可以前後矛盾，Q33 ❌ 就全段都係錯
+
+鐵律1：NEVER LATEX - 絕對唔可以用 $ $ $$ $$ \\( \\) \\frac \\sqrt \\times 等LaTeX，全部用普通文字，例如 x^2, (a+b)/2, k <= 0
+
+鐵律2：繁體廣東話+英文term - MUST繁體中文ONLY，口語：係, 唔係, 睇下, 呢題, 錯咗, 叻仔, 呢步, 記住，數學名詞用英文
+
+鐵律3：一開頭定生死 - MUST用 Q+number 開頭，例如 Q33 ❌ 呢題唔啱 / Q33 ✅ 呢題啱晒！肯定啱！DSE滿分Level！YA
+
+鐵律4：改功課（有手寫相）絕對唔出 GRAPH_EQUATION，問問題先出圖，PDF一定要改晒所有題
+
+鐵律5：紅圈+藍字+練線 - 有圖就一定要出 ANNOTATIONS_JSON: [{"x":0.42,"y":0.35,"text":"k<=0 wrong, test (0,0) vertex","x2":0.55,"y2":0.5}] 英文ONLY，如果要畫線就加 x2 y2
+
+鐵律6：人性化批改格式 - 一定要跟呢個：
+*錯喺邊*：...
+*點諗*：...
+*正確*：...
+💡 DSE伏位：...
+
+鐵律7：Desmos白圖封鎖 - 功課圖絕對唔可以出 Desmos 圖
 """
 
-# V10.7: 2026年10月新Key實測可用
+# V10.7 2026年10月新Key實測可用，舊 2.0/1.5/2.5已shutdown
 MODELS = [
     "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
@@ -71,13 +89,13 @@ def clean_b64(b64):
     return b64
 
 def get_file_base64(data, is_pdf=False):
-    time.sleep(3)
-    for attempt in range(5):
+    time.sleep(2)
+    for attempt in range(6):
         try:
             payload={"message": data}
             url=f"{EVOLUTION_API_URL}/chat/getBase64FromMediaMessage/{EVOLUTION_INSTANCE}"
             headers={"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
-            r=requests.post(url, json=payload, headers=headers, timeout=60)
+            r=requests.post(url, json=payload, headers=headers, timeout=90)
             if r.status_code in [200,201]:
                 m=re.search(r'"base64"\s*:\s*"([^"]{1000,})"', r.text)
                 raw=m.group(1) if m else None
@@ -91,34 +109,35 @@ def get_file_base64(data, is_pdf=False):
                     dec=base64.b64decode(b64, validate=False)
                     mt="application/pdf" if is_pdf or dec[:4]==b'%PDF' else "image/jpeg"
                     return b64, mt
-        except Exception as e: print(f"[M1] err {e}")
-        if attempt<4: time.sleep(8)
+        except Exception as e:
+            print(f"[M1] try {attempt} err {e}")
+        time.sleep(6)
     return None, None
 
 def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
-    prompt=SYSTEM_PROMPT+f"\n\n學生: {question}"
+    prompt=SYSTEM_PROMPT+f"\n\n學生: {question}\n記住：繁體、Q開頭、一致性、唔出Latex、有相就出ANNOTATIONS_JSON"
     for retry in range(2):
         for model in MODELS:
             url=f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
             headers={"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY}
             parts=[{"text": prompt}]
             if file_b64: parts.append({"inlineData": {"mimeType": mime_type, "data": file_b64}})
-            body={"contents": [{"role": "user", "parts": parts}], "generationConfig": {"temperature": 0.3}}
+            body={"contents": [{"role": "user", "parts": parts}], "generationConfig": {"temperature": 0.3, "maxOutputTokens": 3500}}
             try:
-                r=requests.post(url, json=body, headers=headers, timeout=60)
-                print(f"[GEMINI TRY] {model} retry {retry} status {r.status_code}")
+                r=requests.post(url, json=body, headers=headers, timeout=90)
+                print(f"[GEMINI TRY] {model} status {r.status_code}")
                 if r.status_code==200:
                     txt=r.json()["candidates"][0]["content"]["parts"][0]["text"]
                     print(f"[GEMINI OK] {model}")
                     return txt, "ok"
                 elif r.status_code==429:
-                    time.sleep(3); continue
+                    time.sleep(4); continue
                 else:
-                    print(f"[GEMINI FAIL] {model} {r.text[:500]}")
+                    print(f"[GEMINI FAIL] {model} {r.text[:800]}")
             except Exception as e:
                 print(f"[GEMINI EXC] {model} {e}")
         time.sleep(1)
-    return f"@Lc 暫時連唔到，試下等1分鐘再問", "error"
+    return f"@Lc 暫時連唔到，轉頭再試", "error"
 
 def send_typing(jid, stop_event):
     url = f"{EVOLUTION_API_URL}/chat/sendPresence/{EVOLUTION_INSTANCE}"
@@ -136,9 +155,12 @@ def send_text(jid, text):
     headers={"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
     try:
         text = re.sub(r"\$+.*?\$+", "", text)
-        for i in range(0, len(text), 3000):
-            requests.post(url, json={"number": jid, "text": text[i:i+3000]}, headers=headers, timeout=20)
-            time.sleep(0.5)
+        if not text.strip():
+            text = "睇到你份功課喇，幫你望下～"
+        for i in range(0, len(text), 2800):
+            chunk=text[i:i+2800]
+            requests.post(url, json={"number": jid, "text": chunk}, headers=headers, timeout=20)
+            time.sleep(0.6)
     except Exception as e: print(f"Send fail {e}")
 
 def create_annotated_image(original_b64, annotations):
@@ -151,47 +173,70 @@ def create_annotated_image(original_b64, annotations):
         if not annotations: return None
         try:
             fp = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-            font = ImageFont.truetype(fp, int(h*0.022))
+            font = ImageFont.truetype(fp, max(14, int(h*0.024)))
+            font_bold = ImageFont.truetype(fp, max(15, int(h*0.028)))
         except:
             font = ImageFont.load_default()
-        for ann in annotations[:3]:
+            font_bold = font
+        for ann in annotations[:4]:
             try:
                 x=float(ann.get("x",0.5)); y=float(ann.get("y",0.5))
+                x2=ann.get("x2"); y2=ann.get("y2")
                 raw_txt=ann.get("text","").strip()
                 if not (0.02 < x < 0.98 and 0.02 < y < 0.98): continue
                 cx,cy=int(w*x),int(h*y)
-                r=int(min(w,h)*0.038)
-                draw.ellipse([cx-r-3,cy-r-3,cx+r+3,cy+r+3], outline=(255,230,0), width=3)
-                draw.ellipse([cx-r,cy-r,cx+r,cy+r], outline=(210,0,0), width=3)
+                # 練線
+                if x2 is not None and y2 is not None:
+                    try:
+                        x2=float(x2); y2=float(y2)
+                        if 0.02 < x2 < 0.98 and 0.02 < y2 < 0.98:
+                            cx2,cy2=int(w*x2),int(h*y2)
+                            draw.line([cx,cy,cx2,cy2], fill=(210,0,0), width=max(3,int(min(w,h)*0.008)))
+                            draw.ellipse([cx2-7,cy2-7,cx2+7,cy2+7], fill=(210,0,0))
+                    except: pass
+                r=int(min(w,h)*0.042)
+                draw.ellipse([cx-r-4,cy-r-4,cx+r+4,cy+r+4], outline=(255,230,0), width=4)
+                draw.ellipse([cx-r,cy-r,cx+r,cy+r], outline=(210,0,0), width=4)
                 if raw_txt and ENABLE_COMMENTS:
-                    txt = ''.join(c for c in raw_txt if ord(c) < 128)[:28].strip()
+                    txt = ''.join(c for c in raw_txt if ord(c) < 128)[:32].strip()
                     if not txt: continue
-                    tx = cx + r + 10; ty = cy - 5
-                    if tx + 180 > w: tx = max(5, cx - r - 160)
+                    tx = cx + r + 14; ty = cy - 8
+                    if tx + 200 > w: tx = max(8, cx - r - 180)
+                    if ty < 10: ty = cy + r + 8
                     bbox = draw.textbbox((tx,ty), txt, font=font)
-                    pad=5
-                    draw.rounded_rectangle([bbox[0]-pad, bbox[1]-pad, bbox[2]+pad, bbox[3]+pad], radius=6, fill=(255,255,255), outline=(50,100,200), width=1)
-                    draw.text((tx,ty), txt, fill=(20,60,160), font=font)
-            except: continue
+                    pad=6
+                    draw.rounded_rectangle([bbox[0]-pad, bbox[1]-pad, bbox[2]+pad, bbox[3]+pad], radius=8, fill=(255,255,255), outline=(50,100,200), width=2)
+                    draw.text((tx,ty), txt, fill=(20,60,160), font=font_bold)
+            except Exception as e:
+                print(f"ann err {e}")
+                continue
         buf=io.BytesIO()
-        img.save(buf,"JPEG",quality=92)
+        img.save(buf,"JPEG",quality=93)
         return base64.b64encode(buf.getvalue()).decode()
     except Exception as e:
-        print(f"[ANNOTATE] {e}"); return None
+        print(f"[ANNOTATE] {e}")
+        return None
 
 def send_image(jid, image_input, caption):
-    try:
-        b64_data=clean_b64(image_input) if not os.path.exists(str(image_input)) else base64.b64encode(open(image_input,"rb").read()).decode()
-        if not b64_data or len(b64_data)<1000: return False
-        url=f"{EVOLUTION_API_URL}/message/sendMedia/{EVOLUTION_INSTANCE}"
-        headers={"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
-        payload={"number": jid, "mediatype": "image", "media": b64_data, "caption": caption, "fileName": "marked.jpg"}
-        r=requests.post(url, json=payload, headers=headers, timeout=30)
-        return r.status_code in [200,201]
-    except: return False
+    for attempt in range(3):
+        try:
+            if isinstance(image_input, str) and len(image_input) > 1000 and "/" not in image_input[:100]:
+                b64_data=clean_b64(image_input)
+            else:
+                b64_data=base64.b64encode(open(image_input,"rb").read()).decode() if os.path.exists(str(image_input)) else clean_b64(image_input)
+            if not b64_data or len(b64_data)<1000: return False
+            url=f"{EVOLUTION_API_URL}/message/sendMedia/{EVOLUTION_INSTANCE}"
+            headers={"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
+            payload={"number": jid, "mediatype": "image", "media": b64_data, "caption": caption, "fileName": f"marked_{int(time.time())}.jpg"}
+            r=requests.post(url, json=payload, headers=headers, timeout=40)
+            if r.status_code in [200,201]: return True
+            print(f"sendImage fail {r.status_code} {r.text[:500]}")
+        except Exception as e:
+            print(f"sendImage exc {e}")
+        time.sleep(2)
+    return False
 
 def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
-    global LC_MEMORY
     with LOCK:
         now=time.time()
         for k in list(SEEN_IDS.keys()):
@@ -219,11 +264,16 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
             if not is_teacher_user(): stop_typing.set(); return
             GROUP_STATE[jid]=False; save_state(); stop_typing.set()
             send_text(jid, "🔒 \n老師已關閉提問，LC Sir 休息中～"); return
+        if not GROUP_STATE.get(jid, True):
+            low2=text.lower()
+            if not any(k in low2 for k in ["lc","阿sir","阿 sir","sir","老師"]):
+                stop_typing.set(); return
     if from_me and not is_group: stop_typing.set(); return
     if "@g.us" in jid:
         low=text.lower()
         if not any(k in low for k in ["lc","阿sir","阿 sir","sir","老師"]) and "imageMessage" not in msg and "documentMessage" not in msg:
-            if not msg.get("imageMessage", {}).get("caption"): stop_typing.set(); return
+            cap = msg.get("imageMessage", {}).get("caption") if "imageMessage" in msg else ""
+            if not cap: stop_typing.set(); return
         text=f"[{push_name} 問]: {text}"
     b64,mime=None,"image/jpeg"
     is_image_msg = "imageMessage" in msg
@@ -247,18 +297,31 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
     m_ann=re.search(r"ANNOTATIONS_JSON:\s*(\[.*?\])", answer, re.DOTALL)
     if m_ann:
         try: annotations=json.loads(m_ann.group(1))
-        except: pass
-    clean_answer=re.sub(r"GRAPH_EQUATION.*", "", answer).strip()
+        except: 
+            try:
+                txt=m_ann.group(1).replace("'","\"")
+                annotations=json.loads(txt)
+            except: annotations=[]
+    # V10母體兩步走：保留完整文字批改
+    clean_answer=re.sub(r"GRAPH_EQUATION.*", "", answer, flags=re.DOTALL).strip()
     clean_answer=re.sub(r"ANNOTATIONS_JSON:.*", "", clean_answer, flags=re.DOTALL).strip()
-    if "@g.us" in jid and push_name: clean_answer=f"@{push_name} {clean_answer}"
+    clean_answer=re.sub(r"```.*?```", "", clean_answer, flags=re.DOTALL).strip()
+    if not clean_answer or len(clean_answer) < 20:
+        clean_answer = answer.split("ANNOTATIONS_JSON")[0].split("GRAPH_EQUATION")[0].strip()
+    clean_answer=re.sub(r"\$+.*?\$+", "", clean_answer).strip()
+    if not clean_answer:
+        clean_answer = "睇到你份功課喇，幫你望下～"
+    if "@g.us" in jid and push_name and not clean_answer.startswith(f"@{push_name}"):
+        clean_answer=f"@{push_name} {clean_answer}"
+    # 第一步：先出文字批改（V10母體核心）
     send_text(jid, clean_answer)
-    if is_image_msg:
-        if b64 and mime!="application/pdf" and annotations:
-            img_b64=create_annotated_image(b64, annotations)
-            if img_b64:
-                time.sleep(0.6)
-                send_image(jid, img_b64, f"{CROSS} 睇圖，紅圈就係錯嘅位")
-    print(f"[V10.7] Homework mode, Desmos blocked")
+    # 第二步：再出紅圈練線圖
+    if is_image_msg and b64 and mime!="application/pdf" and annotations:
+        time.sleep(1)
+        img_b64=create_annotated_image(b64, annotations)
+        if img_b64:
+            send_image(jid, img_b64, f"{CROSS} 睇圖，紅圈就係錯嘅位")
+    print(f"[{VERSION}] done len={len(clean_answer)} ann={len(annotations)}")
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -278,7 +341,7 @@ def webhook():
     return jsonify({"ok": True}), 200
 
 @app.route("/", methods=["GET"])
-def home(): return f"LC Sir {VERSION} {TICK} mem={len(LC_MEMORY)}", 200
+def home(): return f"LC Sir {VERSION} {TICK}", 200
 @app.route("/health", methods=["GET"])
 def health(): return "ok", 200
 if __name__=="__main__":
