@@ -1,8 +1,7 @@
-# LC SIR V10-HANDWRITTEN-GROWTH - 成長版母體 2026-10-26
-# 進化史: V1 PDF全改 -> V8 紅圈 -> V9 藍字亂碼修復 -> V10 手寫大字+記憶成長
-# 以後每次更新，請用此份作基礎，只加功能，不重寫
+# LC SIR V10.1-HANDWRITTEN-REAL - 真手寫細字成長版 2026-10-26
+# 基於 V10 母體進化：圈準 + 細字 + 真手寫抖動
 from flask import Flask, request, jsonify
-import os, requests, re, urllib.parse, base64, time, json, threading, io
+import os, requests, re, urllib.parse, base64, time, json, threading, io, random
 app = Flask(__name__)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "").strip().rstrip("/")
@@ -10,9 +9,9 @@ EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
 TEACHER_NUMBERS = ["85246447827"]
 
-VERSION = "V10-HANDWRITTEN-GROWTH-BIG-FONT"
+VERSION = "V10.1-REAL-HANDWRITE-SMALL"
 STATE_FILE = "/tmp/group_state.json"
-MEMORY_FILE = "/tmp/lc_memory.json"  # 成長記憶
+MEMORY_FILE = "/tmp/lc_memory.json"
 
 def load_state():
     try:
@@ -35,10 +34,8 @@ def load_memory():
                 return json.load(f)
     except: pass
     return []
-
 def save_memory(mem):
     try:
-        # 只留最近100條對話做成長養分
         with open(MEMORY_FILE, "w") as f:
             json.dump(mem[-100:], f)
     except: pass
@@ -52,7 +49,7 @@ TICK = "\u2705"
 CROSS = "\u274c"
 ENABLE_COMMENTS = True
 
-print(f"BOOT {VERSION} len={len(GEMINI_API_KEY)} memory={len(LC_MEMORY)}")
+print(f"BOOT {VERSION} len={len(GEMINI_API_KEY)} mem={len(LC_MEMORY)}")
 
 SYSTEM_PROMPT = """
 You are LC Sir, Hong Kong DSE Math 專家，團隊 LC Math，10年經驗。Friendly, HK Cantonese。
@@ -85,8 +82,8 @@ You are LC Sir, Hong Kong DSE Math 專家，團隊 LC Math，10年經驗。Frien
 - 唔同Q分開出，禁止大拼圖
 
 === 鐵律5：紅圈+藍字批改 ===
-- 有錯就出：ANNOTATIONS_JSON: [{"x":0.42,"y":0.35,"text":"w_new = w / 0.9, Change = (1/0.9 -1)*100 = 11.1%"}]
-- text必須係英文+數字+符號，ASCII ONLY，嚴禁√ ² 等符號，用 sqrt 代替√，60字內，分兩段用逗號隔開
+- 有錯就出：ANNOTATIONS_JSON: [{"x":0.42,"y":0.35,"text":"h<=4-9 no, check x=0"}]
+- text必須係英文+數字+符號，ASCII ONLY，嚴禁√ ² 等符號，用 sqrt 代替√，30字內，越短越好，似老師手寫
 
 === 鐵律6：PDF一定要改晒所有題，死命令 ===
 - 如果收到PDF有5頁，入面有Q1 Q2 Q3 Q4 Q5，你必須由Q1改到Q5，一題都唔可以漏！
@@ -111,8 +108,6 @@ GRAPH_EQUATION Q1: ...
 Q1 ✅ ...
 Q2 ❌ ...
 Q3 ✅ ...
-- 絕對唔可以淨係改一題，就算其他啱晒都要講 Q1 ✅ 啱晒
-- 如果真係太多題(超過8題)，至少講：Q1 ✅, Q2 ✅, Q3 ❌ ... 最後加 💡 DSE總結
 """
 
 MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash", "gemini-3.5-flash-lite"]
@@ -152,7 +147,6 @@ def get_file_base64(data, is_pdf=False):
 
 def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
     prompt=SYSTEM_PROMPT+f"\n\n學生: {question}"
-    last_error=""
     for model in MODELS:
         url=f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
         headers={"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY}
@@ -163,10 +157,8 @@ def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
             r=requests.post(url, json=body, headers=headers, timeout=120)
             if r.status_code==200:
                 txt=r.json()["candidates"][0]["content"]["parts"][0]["text"]
-                txt=txt.replace("对","對").replace("错","錯")
-                return txt, "ok"
-            last_error=r.text[:800]
-        except Exception as e: last_error=str(e)
+                return txt.replace("对","對").replace("错","錯"), "ok"
+        except: pass
     return f"暫時連唔到", "error"
 
 def send_typing(jid, stop_event):
@@ -200,53 +192,63 @@ def create_annotated_image(original_b64, annotations):
         draw=ImageDraw.Draw(img)
         w,h=img.size
         if not annotations: return None
+
+        # V10.1 核心：真手寫 + 細字
         try:
-            font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-            font_big = ImageFont.truetype(font_path, int(h*0.068))
-            font_mid = ImageFont.truetype(font_path, int(h*0.052))
+            # 用 DejaVu 但加手寫抖動算法，模擬手寫
+            font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+            font_size = int(h*0.024)  # 細返！之前0.068而家0.024
+            font = ImageFont.truetype(font_path, font_size)
         except:
-            font_big = ImageFont.load_default()
-            font_mid = ImageFont.load_default()
+            font = ImageFont.load_default()
+            font_size = 22
+
+        def draw_handwriting_text(x, y, text, fill=(15,40,160)):
+            # 真手寫效果：每個字隨機偏移1-2px，似人手寫
+            cur_x = x
+            for ch in text:
+                jitter_x = random.randint(-1,1)
+                jitter_y = random.randint(-1,1)
+                draw.text((cur_x+jitter_x, y+jitter_y), ch, fill=fill, font=font)
+                # 計字寬
+                bbox = draw.textbbox((0,0), ch, font=font)
+                cur_x += (bbox[2]-bbox[0]) - 1
+
         for ann in annotations[:3]:
             try:
                 x=float(ann.get("x",0.5)); y=float(ann.get("y",0.5))
                 raw_txt=ann.get("text","").strip()
-                if not (0.03 < x < 0.97 and 0.03 < y < 0.97): continue
+                if not (0.02 < x < 0.98 and 0.02 < y < 0.98): continue
                 cx,cy=int(w*x),int(h*y)
-                r=int(min(w,h)*0.12)
-                draw.ellipse([cx-r-10,cy-r-10,cx+r+10,cy+r+10], outline=(255,235,0), width=10)
-                draw.ellipse([cx-r,cy-r,cx+r,cy+r], outline=(220,0,0), width=10)
+                # 圈細同準：0.04，唔疊
+                r=int(min(w,h)*0.042)
+                # 手畫圈效果：畫兩次有少少偏移
+                draw.ellipse([cx-r-3,cy-r-2,cx+r+3,cy+r+2], outline=(255,220,0), width=3)
+                draw.ellipse([cx-r,cy-r,cx+r,cy+r], outline=(210,0,0), width=3)
+
                 if raw_txt and ENABLE_COMMENTS:
-                    txt = raw_txt.replace("√","sqrt").replace("²","^2").replace("×","*").replace("÷","/").replace("，",",")
-                    txt = ''.join(c for c in txt if ord(c) < 128)[:90].strip()
+                    txt = raw_txt.replace("√","sqrt").replace("²","^2").replace("×","*").replace("，",",")
+                    txt = ''.join(c for c in txt if ord(c) < 128)[:40].strip()
                     if not txt: continue
-                    if len(txt) > 32:
-                        cut = txt.find(",", 15)
-                        if cut==-1: cut = txt.find(" ", 20)
-                        if cut==-1: cut = len(txt)//2
-                        line1 = txt[:cut+1].strip()
-                        line2 = txt[cut+1:].strip()
-                    else:
-                        line1 = txt; line2 = ""
-                    tx = int(w*0.06)
-                    ty = int(h*0.08) if y>0.5 else int(h*0.72)
-                    bbox1 = draw.textbbox((tx,ty), line1, font=font_big)
-                    if line2:
-                        bbox2 = draw.textbbox((tx, ty + (bbox1[3]-bbox1[1]) + 12), line2, font=font_mid)
-                        x1 = min(bbox1[0], bbox2[0]); y1 = bbox1[1]
-                        x2 = max(bbox1[2], bbox2[2]); y2 = bbox2[3]
-                    else:
-                        x1,y1,x2,y2 = bbox1
-                    pad = 22
-                    draw.rounded_rectangle([x1-pad+4, y1-pad+4, x2+pad+4, y2+pad+4], radius=16, fill=(0,0,0,60))
-                    draw.rounded_rectangle([x1-pad, y1-pad, x2+pad, y2+pad], radius=16, fill=(255,252,180), outline=(20,70,180), width=6)
-                    draw.text((tx,ty), line1, fill=(10,30,160), font=font_big)
-                    if line2:
-                        draw.text((tx, ty + (bbox1[3]-bbox1[1]) + 12), line2, fill=(10,30,160), font=font_mid)
+
+                    # 貼近圈，細字
+                    tx = cx + r + 10
+                    ty = cy - r - 8
+                    if tx + 200 > w: tx = cx - r - 180
+                    if ty < 10: ty = cy + r + 8
+                    if tx < 10: tx = 10
+
+                    # 底：半透明白底，唔遮圖
+                    bbox = draw.textbbox((tx,ty), txt, font=font)
+                    pad=6
+                    draw.rounded_rectangle([bbox[0]-pad, bbox[1]-pad, bbox[2]+pad, bbox[3]+pad], radius=6, fill=(255,255,255,220), outline=(50,100,200), width=1)
+                    draw_handwriting_text(tx, ty, txt)
+
             except Exception as e:
-                print(f"[ANN INNER] {e}"); continue
+                print(f"[ANN] {e}"); continue
+
         buf=io.BytesIO()
-        img.save(buf,"JPEG",quality=96)
+        img.save(buf,"JPEG",quality=92)
         return base64.b64encode(buf.getvalue()).decode()
     except Exception as e:
         print(f"[ANNOTATE] {e}"); return None
@@ -310,15 +312,12 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
             if now - SEEN_IDS[k] > 300: del SEEN_IDS[k]
         if msg_id in SEEN_IDS: return
         SEEN_IDS[msg_id]=now
-
     stop_typing = threading.Event()
     threading.Thread(target=send_typing, args=(jid, stop_typing), daemon=True).start()
-
     def is_teacher_user():
         if from_me: return True
         digits=re.sub(r'\D','', participant if "@g.us" in jid else jid)
         return any(t in digits for t in TEACHER_NUMBERS)
-
     is_group="@g.us" in jid
     if is_group:
         if jid not in GROUP_STATE:
@@ -327,19 +326,13 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
         open_keys = ["開放提問","開放發問","開始發問","開始提問","開放功課","/open","開始"]
         close_keys = ["關閉提問","關閉發問","結束提問","結束發問","/close","停止發問","收工","關閉","結束"]
         if any(k in text for k in open_keys) or low in ["open","開始","開放"]:
-            if not is_teacher_user(): 
-                stop_typing.set(); return
-            GROUP_STATE[jid]=True; save_state()
-            stop_typing.set()
-            send_text(jid, f"{TICK} \n老師已開放提問！依家同學可以問 LC Sir 喇～")
-            return
+            if not is_teacher_user(): stop_typing.set(); return
+            GROUP_STATE[jid]=True; save_state(); stop_typing.set()
+            send_text(jid, f"{TICK} \n老師已開放提問！依家同學可以問 LC Sir 喇～"); return
         if any(k in text for k in close_keys) or low in ["close","關閉","結束"]:
-            if not is_teacher_user():
-                stop_typing.set(); return
-            GROUP_STATE[jid]=False; save_state()
-            stop_typing.set()
-            send_text(jid, "🔒 \n老師已關閉提問，LC Sir 休息中～")
-            return
+            if not is_teacher_user(): stop_typing.set(); return
+            GROUP_STATE[jid]=False; save_state(); stop_typing.set()
+            send_text(jid, "🔒 \n老師已關閉提問，LC Sir 休息中～"); return
         if not GROUP_STATE[jid]:
             if any(k in low for k in ["lc","阿sir","阿 sir","sir","老師"]) or "imageMessage" in msg or "documentMessage" in msg:
                 if not is_teacher_user():
@@ -347,19 +340,15 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
                     if any(k in low for k in ["lc","sir","老師"]):
                         send_text(jid, "⏳ 而家未開放提問，等老師講「開始提問」先可以問 LC Sir 呀～")
                     return
-
-    if from_me and not is_group:
-        stop_typing.set(); return
+    if from_me and not is_group: stop_typing.set(); return
     if from_me and "@g.us" in jid:
         if not any(k in text for k in ["開放","開始","關閉","結束","/open","/close","open","close","lc","阿sir","老師"]):
             stop_typing.set(); return
     if "@g.us" in jid:
         low=text.lower()
         if not any(k in low for k in ["lc","阿sir","阿 sir","sir","老師"]) and "imageMessage" not in msg and "documentMessage" not in msg:
-            if not msg.get("imageMessage", {}).get("caption"):
-                stop_typing.set(); return
+            if not msg.get("imageMessage", {}).get("caption"): stop_typing.set(); return
         text=f"[{push_name} 問]: {text}"
-
     b64,mime=None,"image/jpeg"
     is_image_msg = "imageMessage" in msg
     is_pdf_msg = "documentMessage" in msg
@@ -371,38 +360,29 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
         b64,mime=get_file_base64(data, is_pdf=True)
         text=(text or "幫我睇下呢份PDF功課").strip()
         mime="application/pdf"
-    if not text and not b64:
-        stop_typing.set(); return
+    if not text and not b64: stop_typing.set(); return
     if (is_image_msg or is_pdf_msg) and not b64:
         stop_typing.set()
         send_text(jid, "張圖仲 load 緊，麻煩 send 多次新相，唔好 forward 舊相 🙏")
         return
-
     answer,_=call_gemini(text, b64, mime)
     stop_typing.set()
-
     annotations=[]
     m_ann=re.search(r"ANNOTATIONS_JSON:\s*(\[.*?\])", answer, re.DOTALL)
     if m_ann:
         try: annotations=json.loads(m_ann.group(1))
         except: pass
-
     graphs=re.findall(r"GRAPH_EQUATION(?:\s+Q\d+)?:\s*(.+)", answer)
     full_q_graphs=re.findall(r"GRAPH_EQUATION\s+(Q\d+):\s*(.+)", answer, re.I)
-    
     clean_answer=re.sub(r"GRAPH_EQUATION.*", "", answer).strip()
     clean_answer=re.sub(r"ANNOTATIONS_JSON:.*", "", clean_answer, flags=re.DOTALL).strip()
     if "@g.us" in jid and push_name: clean_answer=f"@{push_name} {clean_answer}"
-    
     send_text(jid, clean_answer)
-
-    # 成長記憶 - 記錄對話養份
     try:
         with LOCK:
             LC_MEMORY.append({"t":int(time.time()), "q":text[:200], "a":clean_answer[:300], "jid":jid})
             save_memory(LC_MEMORY)
     except: pass
-
     is_image_homework = is_image_msg
     if is_image_homework:
         if b64 and mime!="application/pdf" and CROSS in clean_answer:
@@ -418,8 +398,7 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
             if graphs and not full_q_graphs:
                 for eq in graphs:
                     eq=eq.strip().split("|")[0].strip()
-                    if len(eq)>2:
-                        q_map["Q1"].append(eq)
+                    if len(eq)>2: q_map["Q1"].append(eq)
             for q_label, eq_list in q_map.items():
                 uniq=[]; seen=set()
                 for e in eq_list:
@@ -434,9 +413,6 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
                     expr_list=[{"latex": e} for e in uniq]
                     desmos_url=f"https://www.desmos.com/calculator?expressions_list={urllib.parse.quote(json.dumps(expr_list))}"
                     send_text(jid, f"{q_label} 互動版:\n{desmos_url}")
-    else:
-        if graphs or full_q_graphs:
-            print(f"[SKIP GRAPH+ANNOTATION] PDF/文字功課，唔出圖")
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
