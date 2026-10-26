@@ -1,4 +1,4 @@
-# LC SIR V10.16 - FIX 開始關閉冇反應 + 紅圈字出界
+# LC SIR V10.17 - FINAL FIX 開始關閉 LID + 紅圈字出界
 from flask import Flask, request, jsonify
 import os, requests, re, base64, time, json, threading, io, random
 app = Flask(__name__)
@@ -6,34 +6,22 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "").strip().rstrip("/")
 EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
-TEACHER_NUMBERS = ["85246447827", "46447827"] # 加埋短號，認得更準
-VERSION = "V10.16-FIX-TEACHER-OPEN-CLOSE-AND-TEXT-OVERFLOW"
+TEACHER_NUMBERS = ["85246447827", "46447827"]
+VERSION = "V10.17-FIX-LID-OPEN-CLOSE-TEXT-OVERFLOW"
 STATE_FILE = "/tmp/group_state.json"
-MEMORY_FILE = "/tmp/lc_memory.json"
 
 def load_state():
     try:
         if os.path.exists(STATE_FILE):
             with open(STATE_FILE, "r", encoding="utf-8") as f: return json.load(f)
-    except Exception as e: print(f"[LOAD STATE] {e}")
+    except: pass
     return {}
 def save_state():
     try:
         with open(STATE_FILE, "w", encoding="utf-8") as f: json.dump(GROUP_STATE, f, ensure_ascii=False, indent=2)
-    except Exception as e: print(f"[SAVE STATE] {e}")
-def load_memory():
-    try:
-        if os.path.exists(MEMORY_FILE):
-            with open(MEMORY_FILE, "r", encoding="utf-8") as f: return json.load(f)
-    except Exception as e: print(f"[LOAD MEM] {e}")
-    return []
-def save_memory():
-    try:
-        with open(MEMORY_FILE, "w", encoding="utf-8") as f: json.dump(LC_MEMORY, f, ensure_ascii=False, indent=2)
-    except Exception as e: print(f"[SAVE MEM] {e}")
+    except: pass
 
 GROUP_STATE = load_state()
-LC_MEMORY = load_memory()
 SEEN_IDS = {}; LOCK = threading.Lock()
 TICK = "✅"; CROSS = "❌"
 print(f"BOOT {VERSION}")
@@ -44,7 +32,7 @@ You are LC Sir, HK DSE Math 專家，YA！DSE滿分Level！
 鐵律2：繁體廣東話
 鐵律3：MUST Q+number 開頭 Q33 ❌/✅
 鐵律4：PDF多過6頁都改晒
-鐵律5：紅圈 ANNOTATIONS_JSON 英文ONLY 最後先出，text要短，10字內，唔好長句，例如 "check region III", "wrong inequality"
+鐵律5：紅圈 ANNOTATIONS_JSON 英文ONLY 最後先出，text要短 15字內，例如 "check region III"
 鐵律6：Q33 ❌ *錯喺邊* *點諗* *正確* I and II only 💡 YA
 """
 
@@ -74,12 +62,12 @@ def get_file_base64(data, is_pdf=False):
                     except: pass
                 b64=clean_b64(raw) if raw else None
                 if b64 and len(b64)>1000: return b64, "application/pdf" if is_pdf else "image/jpeg"
-        except Exception as e: print(f"[M1] {e}")
-        time.sleep(3.5)
+        except: pass
+        time.sleep(3)
     return None,None
 
 def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
-    prompt=SYSTEM_PROMPT+f"\n\n學生：{question}\n先出 Q33 文字批改，要有 *錯喺邊* *點諗* *正確*，後出 ANNOTATIONS_JSON，text要短，10字內英文，唔好長句，唔好出界"
+    prompt=SYSTEM_PROMPT+f"\n\n學生：{question}\n先出 Q33 文字批改，後出 ANNOTATIONS_JSON，text短，英文"
     for model in MODELS:
         for retry in range(3):
             url=f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -111,13 +99,11 @@ def send_text(jid, text):
     headers={"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
     try:
         text=text.strip()
-        is_system = any(k in text for k in ["老師已開放提問","老師已關閉提問","LC Sir 休息中"])
-        if not is_system:
-            if not text or len(text)<20: text="收到喇，LC Sir 睇緊先 YA～"
-            if "睇到你份功課喇" in text and len(text)<120: text="收到你份功課喇，幫你逐題睇下先 YA～"
+        is_system = any(k in text for k in ["老師已開放提問","老師已關閉提問","只有老師","LC Sir 休息中"])
+        if not is_system and (not text or len(text)<20): text="收到喇，LC Sir 睇緊先 YA～"
         for i in range(0, len(text), 2500):
             r=requests.post(url, json={"number": jid, "text": text[i:i+2500]}, headers=headers, timeout=20)
-            print(f"[SEND TEXT] status {r.status_code} len={len(text)}")
+            print(f"[SEND TEXT] status {r.status_code} len={len(text)} is_system={is_system}")
             time.sleep(0.7)
     except Exception as e: print(f"Send fail {e}")
 
@@ -128,68 +114,38 @@ def create_annotated_image(original_b64, annotations):
         img_data=base64.b64decode(clean_b64(original_b64))
         img=Image.open(io.BytesIO(img_data)).convert("RGB")
         draw=ImageDraw.Draw(img); w,h=img.size
-        print(f"[ANNOTATE] size {w}x{h} count {len(annotations)}")
         if not annotations: return None
         try:
             fp="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-            font=ImageFont.truetype(fp, max(13, int(h*0.022)))
-            font_bold=ImageFont.truetype(fp, max(14, int(h*0.025)))
+            font=ImageFont.truetype(fp, max(13, int(h*0.020)))
+            font_bold=ImageFont.truetype(fp, max(14, int(h*0.023)))
         except:
             font=ImageFont.load_default(); font_bold=font
-        
         for ann in annotations[:5]:
             try:
                 x=float(ann.get("x",0.5)); y=float(ann.get("y",0.5))
-                x2=ann.get("x2"); y2=ann.get("y2")
                 raw_txt=ann.get("text","").strip()
                 if not (0.02<x<0.98 and 0.02<y<0.98): continue
                 cx,cy=int(w*x),int(h*y)
-                
-                # 畫線
-                if x2 is not None and y2 is not None:
-                    try:
-                        x2f=float(x2); y2f=float(y2)
-                        if 0.02<x2f<0.98 and 0.02<y2f<0.98:
-                            cx2,cy2=int(w*x2f),int(h*y2f)
-                            draw.line([cx,cy,cx2,cy2], fill=(210,0,0), width=max(3,int(min(w,h)*0.008)))
-                    except: pass
-                
-                # 紅圈 + 黃邊
-                r=int(min(w,h)*0.038)
+                r=int(min(w,h)*0.036)
                 draw.ellipse([cx-r-4,cy-r-4,cx+r+4,cy+r+4], outline=(255,230,0), width=4)
                 draw.ellipse([cx-r,cy-r,cx+r,cy+r], outline=(210,0,0), width=4)
-
                 if raw_txt:
-                    # FIX 出界：強制英文短句 + 自動換行 + 邊界檢查
-                    txt=''.join(c for c in raw_txt if ord(c)<128).strip()[:30]
-                    txt='\n'.join(textwrap.wrap(txt, width=18)) # 自動換行，每行18字
-                    if not txt: continue
-                    
-                    # 計算文字框大小
+                    txt=''.join(c for c in raw_txt if ord(c)<128).strip()[:28]
+                    txt='\n'.join(textwrap.wrap(txt, width=16))
                     bbox=draw.multiline_textbbox((0,0), txt, font=font, spacing=2)
                     text_w=bbox[2]-bbox[0]; text_h=bbox[3]-bbox[1]
                     pad=8
-                    
-                    # 預設右邊
-                    tx=cx+r+12; ty=cy - text_h//2
-                    
-                    # FIX1: 如果右邊會出界，就放左邊
+                    tx=cx+r+10; ty=cy - text_h//2
                     if tx + text_w + pad*2 > w - 5:
-                        tx=cx - r - text_w - pad*2 - 12
-                    # FIX2: 如果左邊都出界，就置中底部
-                    if tx < 5:
-                        tx = max(5, min(w - text_w - pad*2 - 5, cx - text_w//2))
-                        ty = cy + r + 12
-                    # FIX3: Y軸唔出界
+                        tx=cx - r - text_w - pad*2 - 10
+                    if tx < 5: tx=5
                     if ty < 5: ty=5
-                    if ty + text_h + pad*2 > h - 5: ty = h - text_h - pad*2 - 5
-                    
-                    # 畫白底
+                    if ty + text_h + pad*2 > h - 5: ty=h - text_h - pad*2 -5
                     draw.rounded_rectangle([tx-pad, ty-pad, tx+text_w+pad, ty+text_h+pad], radius=8, fill=(255,255,255), outline=(50,100,200), width=2)
                     draw.multiline_text((tx, ty), txt, fill=(20,60,160), font=font_bold, spacing=2)
-            except Exception as e:
-                print(f"ann err {e}"); continue
-        buf=io.BytesIO(); img.save(buf,"JPEG",quality=93); return base64.b64encode(buf.getvalue()).decode()
+            except: continue
+        buf=io.BytesIO(); img.save(buf,"JPEG",quality=92); return base64.b64encode(buf.getvalue()).decode()
     except Exception as e: print(f"[ANNOTATE] {e}"); return None
 
 def send_image(jid, image_input, caption):
@@ -209,44 +165,47 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
     stop_typing=threading.Event(); threading.Thread(target=send_typing, args=(jid, stop_typing), daemon=True).start()
 
     def is_teacher_user():
-        # FIX: 更準認老師 46447827，支援冒號LID
+        # FINAL FIX: fromMe=True 就係老師，唔使睇 LID
         if from_me:
-            print(f"[TEACHER] fromMe=True => teacher")
+            print(f"[TEACHER] fromMe=True => 老師本人")
             return True
-        # 試晒所有可能欄位
-        candidates = [participant, data.get("participant",""), key.get("participant","") if 'key' in locals() else "", jid]
-        all_text = " ".join(str(c) for c in candidates)
-        digits = re.sub(r'\D','', all_text)
-        print(f"[TEACHER CHECK] raw={all_text} digits={digits}")
-        for t in TEACHER_NUMBERS:
-            if t in digits or "46447827" in digits:
-                print(f"[TEACHER] MATCH teacher {t}")
-                return True
-        print(f"[TEACHER] NO MATCH => student")
+        check_str = f"{participant} {data.get('participant','')} {jid}"
+        digits = re.sub(r'\D','', check_str)
+        if "46447827" in digits or "85246447827" in check_str:
+            print(f"[TEACHER] digits match 46447827 => 老師")
+            return True
+        print(f"[TEACHER] student LID {participant}")
         return False
 
     is_group="@g.us" in jid
     if is_group:
         if jid not in GROUP_STATE: GROUP_STATE[jid]=True; save_state()
         pure_text=(msg.get("conversation") or msg.get("extendedTextMessage", {}).get("text") or text or "").strip()
-        print(f"[CMD] pure_text='{pure_text}' group={jid} participant={participant}")
-        open_keys=["開放提問","開放發問","開始發問","開始提問","開放問書","開始問書","開放功課","/open"]
-        close_keys=["關閉提問","關閉發問","結束提問","結束發問","關閉問書","結束問書","/close","停止發問","收工"]
-        is_open=any(k in pure_text for k in open_keys) or pure_text.lower()=="open"
-        is_close=any(k in pure_text for k in close_keys) or pure_text.lower()=="close"
+        print(f"[CMD] pure_text='{pure_text}' fromMe={from_me} participant={participant}")
+        # FINAL: 支援單字 開始 / 關閉
+        open_keys=["開始發問","開放提問","開始","開放","開始問書","開放問書","/open","open"]
+        close_keys=["關閉發問","結束發問","關閉","結束","收工","/close","close","停止發問"]
+        # 精確判斷：短指令就係開關
+        lower_pure = pure_text.lower()
+        is_open = any(k in pure_text for k in open_keys) or lower_pure in ["開始","開放","open"]
+        is_close = any(k in pure_text for k in close_keys) or lower_pure in ["關閉","結束","close","收工"]
+        # 如果純粹係 開始/關閉 兩個字，100% 當開關
+        if pure_text in ["開始","關閉","開放","結束","收工","open","close"]:
+            is_open = pure_text in ["開始","開放","open","開始發問","開放提問"]
+            is_close = pure_text in ["關閉","結束","收工","close"]
+
         if is_open or is_close:
             if not is_teacher_user():
-                print(f"[OPEN/CLOSE] blocked student try {pure_text}")
+                print(f"[OPEN/CLOSE] BLOCKED student {pure_text}")
                 stop_typing.set()
-                send_text(jid, "⛔ 只有老師 @85246447827 先可以開/關問書")
                 return
             if is_open:
                 GROUP_STATE[jid]=True; save_state(); stop_typing.set()
-                send_text(jid, f"{TICK} 老師已開放提問！依家同學可以問 LC Sir 喇～\n\n同學直接 Send 功課相就得，LC Sir 會逐題改，包埋紅圈同 *錯喺邊* *點諗* *正確*，DSE滿分Level YA！\n\n要暫停就打「關閉發問」")
+                send_text(jid, f"{TICK} 老師已開放提問！依家同學可以問 LC Sir 喇～\n\n同學直接 Send 功課相就得，LC Sir 會逐題改，包埋紅圈同 *錯喺邊* *點諗* *正確*，DSE滿分Level YA！")
                 return
             else:
                 GROUP_STATE[jid]=False; save_state(); stop_typing.set()
-                send_text(jid, f"🔒 老師已關閉提問，LC Sir 休息中～\n\n暫停期間同學 Send 相唔會回覆，要再開就打「開始發問」")
+                send_text(jid, f"🔒 老師已關閉提問，LC Sir 休息中～\n\n暫停期間同學 Send 相唔會回覆，要再開就打「開始」或者「開始發問」")
                 return
         if not GROUP_STATE.get(jid, True):
             if not any(k in text.lower() for k in ["lc","阿sir","老師"]):
@@ -262,8 +221,7 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
     if (is_image or is_pdf) and not b64: stop_typing.set(); send_text(jid, "份file仲 load 緊，麻煩再send多次 🙏"); return
 
     answer,status=call_gemini(text, b64, mime); stop_typing.set()
-    if not answer or len(answer.strip())<50:
-        answer="收到喇，LC Sir 幫你睇緊先 YA～"
+    if not answer or len(answer.strip())<50: answer="收到喇，LC Sir 幫你睇緊先 YA～"
     annotations=[]; m_ann=re.search(r"ANNOTATIONS_JSON:\s*(\[.*?\])", answer, re.DOTALL)
     if m_ann:
         try: annotations=json.loads(m_ann.group(1))
@@ -286,7 +244,7 @@ def webhook():
     text=msg.get("conversation") or msg.get("extendedTextMessage", {}).get("text") or ""
     if not text and "imageMessage" in msg: text=msg["imageMessage"].get("caption") or ""
     msg_id=key.get("id") or f"no-id-{int(time.time()*1000)}"
-    print(f"[WEBHOOK] jid={jid} text='{text[:50]}' participant={participant} fromMe={from_me}")
+    print(f"[WEBHOOK] jid={jid} text='{text}' participant={participant} fromMe={from_me}")
     threading.Thread(target=do_work, args=(jid, text, push_name, participant, from_me, msg, data, msg_id), daemon=True).start()
     return jsonify({"ok": True}), 200
 @app.route("/", methods=["GET"])
