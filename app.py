@@ -298,7 +298,7 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
     send_text(jid, clean_answer)
     if is_image and b64 and annotations:
         time.sleep(1); img_b64=create_annotated_image(b64, annotations)
-        if img_b64: send_image(jid, img_b64, f"{tick} 睇下圖，圈咗俾你留意下嘅位 ya ")
+        if img_b64: send_image(jid, img_b64, f"{TICK} 睇下圖，圈咗俾你留意下嘅位 ya ")
     print(f"[{VERSION}] done len={len(clean_answer)} ann={len(annotations)}")
 
 @app.route("/webhook", methods=["POST"])
