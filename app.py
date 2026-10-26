@@ -30,6 +30,33 @@ TICK = "✅"
 CROSS = "❌"
 print(f"BOOT {VERSION}")
 
+# 加喺 GROUP_STATE 下面
+GROUP_HISTORY = {} # jid -> {text, answer, time}
+
+def do_work(jid, text, ...):
+    my_jid = str(jid).strip()
+    
+    # 1. 攞返上一次嘅功課
+    history = GROUP_HISTORY.get(my_jid)
+    is_followup = any(k in text for k in ["解釋", "點解", "再講", "多少少", "睇唔明"]) and len(text) < 30
+    
+    # 如果係追問 + 冇圖，就用返上次份功課去問 Gemini
+    if is_followup and history and not b64:
+        print(f"[FOLLOWUP] jid={my_jid[-10:]} 用返上次功課 Q={history.get('last_q')}")
+        question_for_gemini = f"上次份功課最後答：{history['answer'][:800]}\n\n學生而家追問：{text}\n請針對返上次份功課嘅 Q7 精簡再解釋，唔好答第二個學生嘅題目，淨係講 Q7，最多3行。"
+        # 用 history 入面張圖都得
+        b64 = history.get("image_b64")
+        text = question_for_gemini
+    # ... 原有 call_gemini ...
+
+    # 答完之後，記住佢
+    GROUP_HISTORY[my_jid] = {
+        "answer": clean_answer,
+        "image_b64": b64 if is_image else history.get("image_b64") if history else None,
+        "time": time.time(),
+        "last_q": "Q7" if "Q7" in text else ""
+    }
+
 def get_group_lock(jid):
     with LOCK:
         if jid not in GROUP_LOCKS:
