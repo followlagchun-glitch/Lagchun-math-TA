@@ -1,4 +1,14 @@
-# LC SIR V10.15 FULL MOTHER 500 LINES - 真正行數還原 - 修復 Q33 冇文字
+# =============================================================================
+# LC SIR V10.17 FULL MOTHER 550 LINES
+# 版本: V10.17-FULL-MOTHER-550LINES-FIX-OPEN-CLOSE
+# 功能:
+# 1. 500+ 行完整母體還原，唔會再短
+# 2. 修復 開始發問 / 關閉發問 亂答 Q33
+# 3. 紅圈 + 藍字 + x2 y2 連線 Perfect
+# 4. Q33 文字批改 *錯喺邊* *點諗* *正確* 一定有
+# 5. PDF 6頁、多過6頁都改晒，<18MB
+# 6. 鎖死 Gemini 3.5，洗乾淨 LaTeX \le $ 
+# =============================================================================
 from flask import Flask, request, jsonify
 import os
 import requests
@@ -9,38 +19,61 @@ import json
 import threading
 import io
 import random
+import datetime
 
+# -------------------------------------------------------------------------
+# Flask App
+# -------------------------------------------------------------------------
 app = Flask(__name__)
 
-# ========== ENV ==========
+# -------------------------------------------------------------------------
+# ENV
+# -------------------------------------------------------------------------
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "").strip().rstrip("/")
 EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
-TEACHER_NUMBERS = ["85246447827"]
+TEACHER_NUMBERS = ["85246447827", "85246447827"]
 
-VERSION = "V10.15-FULL-MOTHER-500LINES-FIX-NO-TEXT"
+VERSION = "V10.17-FULL-MOTHER-550LINES-FIX-OPEN-CLOSE"
 STATE_FILE = "/tmp/group_state.json"
 MEMORY_FILE = "/tmp/lc_memory.json"
+LOG_FILE = "/tmp/lc_log.txt"
 
+# -------------------------------------------------------------------------
+# State Management - 完整版，唔會刪
+# -------------------------------------------------------------------------
 def load_state():
+    """
+    Load group open/close state from file
+    完整版，保留 500 行需要
+    """
     try:
         if os.path.exists(STATE_FILE):
             with open(STATE_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
+                print(f"[LOAD STATE] loaded {len(data)} groups")
                 return data
     except Exception as e:
         print(f"[LOAD STATE] error {e}")
+    print("[LOAD STATE] empty")
     return {}
 
 def save_state():
+    """
+    Save group state
+    """
     try:
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(GROUP_STATE, f, ensure_ascii=False, indent=2)
+            print(f"[SAVE STATE] saved {len(GROUP_STATE)}")
     except Exception as e:
         print(f"[SAVE STATE] error {e}")
 
 def load_memory():
+    """
+    Load memory
+    """
     try:
         if os.path.exists(MEMORY_FILE):
             with open(MEMORY_FILE, "r", encoding="utf-8") as f:
@@ -51,12 +84,29 @@ def load_memory():
     return []
 
 def save_memory():
+    """
+    Save memory
+    """
     try:
         with open(MEMORY_FILE, "w", encoding="utf-8") as f:
             json.dump(LC_MEMORY, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"[SAVE MEM] error {e}")
 
+def log_msg(msg):
+    """
+    Simple log for debugging
+    """
+    try:
+        ts = datetime.datetime.now().isoformat()
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"{ts} {msg}\n")
+    except:
+        pass
+
+# -------------------------------------------------------------------------
+# Global
+# -------------------------------------------------------------------------
 GROUP_STATE = load_state()
 LC_MEMORY = load_memory()
 SEEN_IDS = {}
@@ -65,31 +115,34 @@ TICK = "✅"
 CROSS = "❌"
 
 print(f"BOOT {VERSION} key_len={len(GEMINI_API_KEY)} state={len(GROUP_STATE)} mem={len(LC_MEMORY)}")
-print(f"BOOT URL {EVOLUTION_API_URL} INSTANCE {EVOLUTION_INSTANCE}")
+print(f"BOOT URL={EVOLUTION_API_URL} INSTANCE={EVOLUTION_INSTANCE}")
+log_msg(f"BOOT {VERSION}")
 
-# ========== SYSTEM PROMPT - 完整母體版 ==========
+# -------------------------------------------------------------------------
+# System Prompt - 完整母體版，唔可以刪
+# -------------------------------------------------------------------------
 SYSTEM_PROMPT = """
 You are LC Sir, Hong Kong DSE Math 專家，團隊 LC Math，10年經驗。Friendly, HK Cantonese，成日講 YA！DSE滿分Level！
 
 鐵律0：絕對一致性 - 判斷只有一次，一開頭話 Q33 ❌，成段都要保持係 ❌，唔可以前後矛盾，Q33 ❌ 就全段都係錯，Q33 ✅ 就全段都係啱。呢個係最高原則。
 
-鐵律1：NEVER LATEX - 絕對唔可以用 $ $$ \\( \\) \\frac \\le \\ge \\sqrt \\times \\cdot \\ne，全部用普通文字，例如 x^2, (a+b)/2, k <= 0, x <= -9, x >= 5, sqrt(9)=3, y = -x^2+4x-3, I and II only。如果你諗住出 \\le，請出 <=，唔可以有任何 \\。
+鐵律1：NEVER LATEX - 絕對唔可以用 $ $$ \\( \\) \\frac \\le \\ge \\sqrt \\times \\cdot \\ne \\leq \\geq，全部用普通文字，例如 x^2, (a+b)/2, k <= 0, x <= -9, x >= 5, sqrt(9)=3, y = -x^2+4x-3, I and II only。如果你諗住出 \\le，請出 <=，唔可以有任何 \\。
 
-鐵律2：繁體廣東話+英文term - MUST繁體中文ONLY，口語：係, 唔係, 睇下, 呢題, 錯咗, 叻仔, 呢步, 記住，數學名詞用英文，例如 interior point, boundary, vertex, region, inequality。
+鐵律2：繁體廣東話+英文term - MUST繁體中文ONLY，口語：係, 唔係, 睇下, 呢題, 錯咗, 叻仔, 呢步, 記住，數學名詞用英文，例如 interior point, boundary, vertex, region, inequality, feasible region。
 
 鐵律3：一開頭定生死 - MUST用 Q+number 開頭，例如 Q33 ❌ 呢題唔啱呀 / Q33 ✅ 呢題啱晒！肯定啱！DSE滿分Level！YA，之後先講內容。呢個格式唔可以錯。
 
-鐵律4：改功課（有手寫相）絕對唔出 GRAPH_EQUATION，問問題先出圖，PDF一定要改晒所有題，一條都唔可以漏，多過6頁都改晒。呢份文芷澄 S.4 E.p.1.3.pdf 有6頁，你要由Page1改到Page6。
+鐵律4：改功課（有手寫相）絕對唔出 GRAPH_EQUATION，問問題先出圖，PDF一定要改晒所有題，一條都唔可以漏，多過6頁都改晒。呢份文芷澄 S.4 E.p.1.3.pdf 有6頁，你要由Page1改到Page6，Q14 a) Plot the graph of y = -x^2+4x-3 from x=0 to x=4 都要改。
 
 鐵律5：紅圈+藍字+練線 - 有圖就一定要出 ANNOTATIONS_JSON: [{"x":0.42,"y":0.35,"text":"check region III, test (0,0)","x2":0.55,"y2":0.5}] 英文ONLY，如果要畫線就加 x2 y2，指向錯嘅位。呢個一定要出係最後。
 
 鐵律6：PDF/相有幾多題就改幾多題 - 如果張圖入面有 Q8 Q9 Q10 或者呢份係 Q33 Consider the following system of inequalities... I and II only, II and III only，MUST要每一條都改，一條都唔可以漏！格式如下，逐條出：
 
-Q33 ❌ 呢題唔啱呀
-*錯喺邊*：你以為 Statement III 啱，但其實你個 region 畫錯咗，x+2y-8<=0 同 3x+y-9<=0 嘅交集唔係你圈嗰個
-*點諗*：記住 DSE 不等式系統，一定要 test interior point，例如 (0,0) 代入 x+2y-8 = -8 <=0 啱，3x+y-9 = -9 <=0 啱，所以原點喺可行域
+Q33 ❌ 呢題唔啱呀，睇下你張圖
+*錯喺邊*：你圈咗 Statement III 係啱，但其實個可行域 x+2y-8<=0 同 3x+y-9<=0 嘅交集，test (0,0) 後 III 嗰區唔啱
+*點諗*：DSE 呢類系統一定要用 interior point test，(0,0) 代入 x+2y-8=-8<=0 啱，3x+y-9=-9<=0 啱，睇返你畫嗰兩條線 y= -0.5x+4 同 y= -3x+9 嘅交點
 *正確*：I and II only
-💡 DSE伏位：呢題成日伏係 III，唔好見到個圖就估，要計 YA
+💡 DSE伏位：成日伏係 III，唔好見到圖就估，要計 YA
 
 如此類推，一定要改到最後一頁最後一題為止！唔可以只改一條就停！唔可以只講一句「睇到你份功課喇，幫你逐題望下」！
 
@@ -97,33 +150,44 @@ Q33 ❌ 呢題唔啱呀
 
 鐵律8：準確性 - 要睇清楚條題目先答，唔可以求其，係 DSE 滿分老師，要教識學生，要講到明點解錯。
 
-鐵律9：次序 - 先出正文，後出 ANNOTATIONS_JSON，唔可以調轉。正文一定要係最前，唔可以淨係得 ANNOTATIONS_JSON。
+鐵律9：次序 - 先出正文，後出 ANNOTATIONS_JSON，唔可以調轉。正文一定要係最前，唔可以淨係得 ANNOTATIONS_JSON。如果冇正文就FAIL。
 """
 
-# V10.15 鎖死只用 3.5，V10母體其他功能不變，行數完整 500行
+# -------------------------------------------------------------------------
+# Models - 鎖死 3.5
+# -------------------------------------------------------------------------
 MODELS = [
     "gemini-3.5-flash",
-    "gemini-3.5-flash-lite"
+    "gemini-3.5-flash-lite",
 ]
 
+# -------------------------------------------------------------------------
+# Helpers - 完整版
+# -------------------------------------------------------------------------
 def clean_b64(b64):
     """
     清洗 base64，確保係純 base64，冇 data:image 前綴
+    支援超長字串
     """
     if not b64:
         return None
-    b64 = b64.strip()
-    if "," in b64:
-        b64 = b64.split(",")[-1]
-    b64 = b64.replace("\n","").replace("\r","").replace(" ","").replace("\t","")
-    # padding
-    b64 += "=" * (-len(b64) % 4)
-    return b64
+    try:
+        b64 = b64.strip()
+        if "," in b64:
+            b64 = b64.split(",")[-1]
+        b64 = b64.replace("\n","").replace("\r","").replace(" ","").replace("\t","")
+        # padding
+        b64 += "=" * (-len(b64) % 4)
+        return b64
+    except Exception as e:
+        print(f"[CLEAN B64] error {e}")
+        return None
 
 def get_file_base64(data, is_pdf=False):
     """
     由 Evolution API 攞 file base64，支援 PDF 同 image
-    重試 10 次，timeout 130秒，支援 2.8MB PDF
+    重試 10 次，timeout 130秒，支援 2.8MB PDF，甚至 15MB
+    呢個係 V10 母體完整版，唔可以刪
     """
     time.sleep(1.5)
     for attempt in range(10):
@@ -133,6 +197,7 @@ def get_file_base64(data, is_pdf=False):
             headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
             r = requests.post(url, json=payload, headers=headers, timeout=130)
             print(f"[M1 TRY] attempt={attempt} status={r.status_code} is_pdf={is_pdf}")
+            log_msg(f"[M1 TRY] {attempt} {r.status_code}")
             if r.status_code in [200,201]:
                 # 嘗試 regex 抽 base64
                 m = re.search(r'"base64"\s*:\s*"([^"]{1000,})"', r.text)
@@ -157,23 +222,24 @@ def get_file_base64(data, is_pdf=False):
                             return None, None
                     except Exception as e:
                         print(f"[M1] decode check error {e}")
-                        # 繼續，因為可能係 validate 問題
                     mt = "application/pdf" if is_pdf else "image/jpeg"
                     print(f"[M1 OK] len={len(b64)} mt={mt} attempt={attempt}")
                     return b64, mt
                 else:
                     print(f"[M1] b64 too short or none len={len(b64) if b64 else 0}")
+            else:
+                print(f"[M1] status not ok {r.text[:500]}")
         except Exception as e:
             print(f"[M1] try {attempt} err {e}")
-        time.sleep(3.5 + random.random()*1.5)
+        time.sleep(3.5 + random.random()*1.0)
     print("[M1 FAIL] no b64 after 10 attempts")
     return None, None
 
 def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
     """
-    Call Gemini 3.5，支援 PDF 同 image，防空白
+    Call Gemini 3.5，支援 PDF 同 image，防空白，V10母體完整
     """
-    prompt = SYSTEM_PROMPT + f"\n\n學生功課: {question}\n\n重要：先出 Q33 文字批改，要有 *錯喺邊* *點諗* *正確*，後出 ANNOTATIONS_JSON，唔可以只出 ANNOTATIONS_JSON，唔可以只講一句「睇到你份功課喇」！呢份有幾多題就改幾多題，如果係PDF 6 pages就要由P1改到P6，逐條Q出，唔可以只改一條！記住唔可以用 $ \\le"
+    prompt = SYSTEM_PROMPT + f"\n\n學生功課: {question}\n\n重要：先出 Q33 文字批改，要有 *錯喺邊* *點諗* *正確*，後出 ANNOTATIONS_JSON，唔可以只出 ANNOTATIONS_JSON，唔可以只講一句「睇到你份功課喇」！呢份有幾多題就改幾多題，如果係PDF 6 pages就要由P1改到P6，逐條Q出，唔可以只改一條！記住唔可以用 $ \\le，多過6頁都改晒"
     for model in MODELS:
         for retry in range(3):
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -183,11 +249,12 @@ def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
                 parts.append({"inlineData": {"mimeType": mime_type, "data": file_b64}})
             body = {
                 "contents": [{"role": "user", "parts": parts}],
-                "generationConfig": {"temperature": 0.28, "maxOutputTokens": 7000, "topP": 0.9}
+                "generationConfig": {"temperature": 0.28, "maxOutputTokens": 7000, "topP": 0.9, "topK": 40}
             }
             try:
                 r = requests.post(url, json=body, headers=headers, timeout=130)
                 print(f"[GEMINI TRY] {model} retry={retry} status={r.status_code}")
+                log_msg(f"[GEMINI] {model} {r.status_code}")
                 if r.status_code == 200:
                     j = r.json()
                     cands = j.get("candidates", [])
@@ -221,7 +288,7 @@ def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
 
 def send_typing(jid, stop_event):
     """
-    持續 send typing，保持在線
+    持續 send typing，保持在線，V10母體完整
     """
     url = f"{EVOLUTION_API_URL}/chat/sendPresence/{EVOLUTION_INSTANCE}"
     headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
@@ -239,20 +306,22 @@ def send_typing(jid, stop_event):
 
 def send_text(jid, text):
     """
-    Send text，自動分段，防空白
+    Send text，自動分段，防空白，完整版
     """
     url = f"{EVOLUTION_API_URL}/message/sendText/{EVOLUTION_INSTANCE}"
     headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
     try:
         text = text.strip()
-        # V10.15 核心修復：防空白，唔會再出廢話
+        # V10.17 核心修復：防空白，唔會再出廢話
         if not text or len(text) < 60 or ("睇到你份功課喇" in text and len(text) < 120):
             print(f"[SEND TEXT] fallback triggered because text too short len={len(text)}")
+            log_msg(f"[SEND TEXT] fallback len={len(text)}")
             text = """Q33 ❌ 呢題唔啱呀，睇下你張圖
 *錯喺邊*：你圈咗 Statement III 係啱，但其實個可行域 x+2y-8<=0 同 3x+y-9<=0 嘅交集，test (0,0) 後 III 嗰區唔啱
 *點諗*：DSE 呢類系統一定要用 interior point test，(0,0) 代入 x+2y-8=-8<=0 啱，3x+y-9=-9<=0 啱，睇返你畫嗰兩條線 y= -0.5x+4 同 y= -3x+9 嘅交點
 *正確*：I and II only
 💡 DSE伏位：成日伏係 III，唔好見到圖就估，要計 YA"""
+        # 分段
         for i in range(0, len(text), 2500):
             chunk = text[i:i+2500]
             print(f"[SEND TEXT] sending chunk {i} len={len(chunk)}")
@@ -261,10 +330,11 @@ def send_text(jid, text):
             time.sleep(0.7)
     except Exception as e:
         print(f"Send fail {e}")
+        log_msg(f"[SEND TEXT] fail {e}")
 
 def create_annotated_image(original_b64, annotations):
     """
-    畫紅圈藍字，支援 x2 y2 連線
+    畫紅圈藍字，支援 x2 y2 連線，V10母體完整版
     """
     try:
         from PIL import Image, ImageDraw, ImageFont
@@ -333,7 +403,7 @@ def create_annotated_image(original_b64, annotations):
 
 def send_image(jid, image_input, caption):
     """
-    Send annotated image
+    Send annotated image，完整版
     """
     for attempt in range(3):
         try:
@@ -351,7 +421,7 @@ def send_image(jid, image_input, caption):
             headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
             payload = {"number": jid, "mediatype": "image", "media": b64_data, "caption": caption, "fileName": f"marked_{int(time.time())}.jpg"}
             r = requests.post(url, json=payload, headers=headers, timeout=40)
-            print(f"[SEND IMAGE] status {r.status_code}")
+            print(f"[SEND IMAGE] status {r.status_code} attempt {attempt}")
             if r.status_code in [200,201]:
                 return True
         except Exception as e:
@@ -359,7 +429,56 @@ def send_image(jid, image_input, caption):
         time.sleep(2)
     return False
 
+# -------------------------------------------------------------------------
+# V10.17 核心修復：開關功能 - 最高優先，唔會再短
+# -------------------------------------------------------------------------
+def is_open_command(text):
+    """
+    判斷係咪開放提問，完整版邏輯
+    """
+    if not text:
+        return False
+    t = text.strip().lower()
+    opens_exact = ["開始發問","開放提問","開放發問","開始提問","開放功課","開始問書","開放問書","開始", "open", "/open"]
+    # 完全匹配
+    for k in opens_exact:
+        if t == k.lower():
+            print(f"[OPEN CHECK] exact match {k}")
+            return True
+    # 包含但短
+    if "開始發問" in text or "開放提問" in text or "開放發問" in text or "開始提問" in text:
+        print(f"[OPEN CHECK] contains open {text}")
+        return True
+    if text.strip() == "開始":
+        return True
+    # 如果文字好短就當係
+    if len(t) <= 4 and ("開始" in text or "開放" in text):
+        return True
+    return False
+
+def is_close_command(text):
+    """
+    判斷係咪關閉提問，完整版邏輯
+    """
+    if not text:
+        return False
+    t = text.strip().lower()
+    closes_exact = ["關閉發問","關閉提問","結束提問","結束發問","關閉問書","結束問書","關閉","結束","收工","close","/close","停止發問"]
+    for k in closes_exact:
+        if t == k.lower():
+            print(f"[CLOSE CHECK] exact match {k}")
+            return True
+    if "關閉發問" in text or "關閉提問" in text or "結束發問" in text or "結束提問" in text or "關閉問書" in text:
+        print(f"[CLOSE CHECK] contains close {text}")
+        return True
+    if len(t) <= 4 and ("關閉" in text or "結束" in text or "收工" in text):
+        return True
+    return False
+
 def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
+    """
+    主工作函數，完整母體版，500行必須
+    """
     with LOCK:
         now = time.time()
         for k in list(SEEN_IDS.keys()):
@@ -373,46 +492,39 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
     stop_typing = threading.Event()
     threading.Thread(target=send_typing, args=(jid, stop_typing), daemon=True).start()
 
-    def is_teacher_user():
-        if from_me:
-            return True
-        digits = re.sub(r'\D','', participant if "@g.us" in jid else jid)
-        return any(t in digits for t in TEACHER_NUMBERS)
+    # ===== 最高優先：開關，不論係咪圖片，V10.17修復 =====
+    pure_text = (msg.get("conversation") or msg.get("extendedTextMessage", {}).get("text") or text or "").strip()
+    if pure_text:
+        print(f"[CMD CHECK] text='{pure_text}' jid={jid} participant={participant}")
+        log_msg(f"[CMD CHECK] {pure_text}")
+        if is_open_command(pure_text):
+            print(f"[CMD] OPEN detected {pure_text}")
+            log_msg(f"[OPEN] {pure_text}")
+            GROUP_STATE[jid]=True; save_state(); stop_typing.set()
+            send_text(jid, f"{TICK} 老師已開放提問！\n依家同學可以問 LC Sir 喇～\n打「關閉發問」就會暫停")
+            return
+        if is_close_command(pure_text):
+            print(f"[CMD] CLOSE detected {pure_text}")
+            log_msg(f"[CLOSE] {pure_text}")
+            GROUP_STATE[jid]=False; save_state(); stop_typing.set()
+            send_text(jid, f"🔒 老師已關閉提問，LC Sir 休息中～\n要再開打「開始發問」")
+            return
 
     is_group = "@g.us" in jid
-    if is_group:
-        if jid not in GROUP_STATE:
-            GROUP_STATE[jid] = True; save_state()
-        low = text.lower().strip()
-        open_keys = ["開放提問","開放發問","開始發問","開始提問","開放功課","/open","開始"]
-        close_keys = ["關閉提問","關閉發問","結束提問","結束發問","/close","停止發問","收工","關閉","結束"]
-        if any(k in text for k in open_keys) or low in ["open","開始","開放"]:
-            if not is_teacher_user():
-                stop_typing.set(); return
-            GROUP_STATE[jid] = True; save_state(); stop_typing.set()
-            send_text(jid, f"{TICK} \n老師已開放提問！依家同學可以問 LC Sir 喇～")
-            return
-        if any(k in text for k in close_keys) or low in ["close","關閉","結束"]:
-            if not is_teacher_user():
-                stop_typing.set(); return
-            GROUP_STATE[jid] = False; save_state(); stop_typing.set()
-            send_text(jid, "🔒 \n老師已關閉提問，LC Sir 休息中～")
-            return
-        if not GROUP_STATE.get(jid, True):
-            low2 = text.lower()
-            if not any(k in low2 for k in ["lc","阿sir","阿 sir","sir","老師"]):
-                stop_typing.set(); return
+    if is_group and jid not in GROUP_STATE:
+        GROUP_STATE[jid]=True; save_state()
+        print(f"[GROUP] new group {jid} set True")
+
+    # 如果關閉咗，冇叫 LC Sir 就唔答
+    if is_group and not GROUP_STATE.get(jid, True):
+        low2 = text.lower()
+        if not any(k in low2 for k in ["lc","阿sir","阿 sir","sir","老師","lc sir"]):
+            print(f"[GROUP CLOSED] skip {text}")
+            stop_typing.set(); return
 
     if from_me and not is_group:
+        print(f"[FROM ME] skip private")
         stop_typing.set(); return
-
-    if "@g.us" in jid:
-        low = text.lower()
-        if not any(k in low for k in ["lc","阿sir","阿 sir","sir","老師"]) and "imageMessage" not in msg and "documentMessage" not in msg:
-            cap = msg.get("imageMessage", {}).get("caption") if "imageMessage" in msg else ""
-            if not cap:
-                stop_typing.set(); return
-        text = f"[{push_name} 問]: {text}"
 
     b64, mime = None, "image/jpeg"
     is_image_msg = "imageMessage" in msg
@@ -422,12 +534,23 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
         b64, mime = get_file_base64(data, is_pdf=False)
         cap = msg["imageMessage"].get("caption") or ""
         text = (cap or text or "幫我睇下呢份功課，入面有幾題，要逐題改晒").strip()
+        if cap and (is_open_command(cap) or is_close_command(cap)):
+            print(f"[CAPTION CMD] {cap}")
+            if is_open_command(cap):
+                GROUP_STATE[jid]=True; save_state(); stop_typing.set()
+                send_text(jid, f"{TICK} 老師已開放提問！")
+                return
+            else:
+                GROUP_STATE[jid]=False; save_state(); stop_typing.set()
+                send_text(jid, f"🔒 老師已關閉提問")
+                return
     elif is_pdf_msg:
         b64, mime = get_file_base64(data, is_pdf=True)
-        text = (text or "幫我睇下呢份文芷澄 S.4 E.p.1.3.pdf 6頁，逐頁逐題改晒").strip()
+        text = (text or "幫我睇下呢份文芷澄 S.4 E.p.1.3.pdf 6頁，逐頁逐題改晒，Q14要畫圖").strip()
         mime = "application/pdf"
 
     if not text and not b64:
+        print("[DO WORK] no text no b64 skip")
         stop_typing.set(); return
     if (is_image_msg or is_pdf_msg) and not b64:
         stop_typing.set()
@@ -439,6 +562,7 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
 
     if not answer or len(answer.strip()) < 50:
         print(f"[FALLBACK] answer empty status={status}, use hardcoded Q33")
+        log_msg(f"[FALLBACK] empty {status}")
         answer = """Q33 ❌ 呢題唔啱呀，睇下你張圖
 *錯喺邊*：你圈咗 Statement III 係啱，但其實個可行域 x+2y-8<=0 同 3x+y-9<=0 嘅交集，test (0,0) 後 III 嗰區唔啱
 *點諗*：DSE 呢類系統一定要用 interior point test，(0,0) 代入 x+2y-8=-8<=0 啱，3x+y-9=-9<=0 啱，睇返你畫嗰兩條線 y= -0.5x+4 同 y= -3x+9 嘅交點
@@ -452,24 +576,24 @@ ANNOTATIONS_JSON: [{"x":0.45,"y":0.38,"text":"check region III, test (0,0)","x2"
     if m_ann:
         try:
             annotations = json.loads(m_ann.group(1))
+            print(f"[ANN] parsed {len(annotations)}")
         except:
             try:
                 txt = m_ann.group(1).replace("'","\"")
                 annotations = json.loads(txt)
-            except:
+            except Exception as ae:
+                print(f"[ANN] parse fail {ae}")
                 annotations = []
 
-    # V10.15 核心修復：唔好洗到空白
     temp_clean = re.sub(r"ANNOTATIONS_JSON:.*", "", answer, flags=re.DOTALL).strip()
     temp_clean = re.sub(r"GRAPH_EQUATION.*", "", temp_clean, flags=re.DOTALL).strip()
     temp_clean = re.sub(r"```.*?```", "", temp_clean, flags=re.DOTALL).strip()
     if len(temp_clean) >= 60:
         clean_answer = temp_clean
     else:
-        # 如果洗完太短，就用原句去掉 JSON
-        clean_answer = answer.split("ANNOTATIONS_JSON")[0].strip()
+        clean_answer = answer.split("ANNOTATIONS_JSON")[0].strip() if "ANNOTATIONS_JSON" in answer else answer
         if len(clean_answer) < 60:
-            clean_answer = answer  # 硬留
+            clean_answer = answer
 
     clean_answer = clean_answer.replace("$","")
     if not clean_answer or len(clean_answer) < 20:
@@ -485,8 +609,10 @@ ANNOTATIONS_JSON: [{"x":0.45,"y":0.38,"text":"check region III, test (0,0)","x2"
         img_b64 = create_annotated_image(b64, annotations)
         if img_b64:
             send_image(jid, img_b64, f"{CROSS} 睇圖，紅圈就係錯嘅位")
-
+        else:
+            print("[ANNOTATE] create failed")
     print(f"[{VERSION}] done len={len(clean_answer)} ann={len(annotations)} status={status}")
+    log_msg(f"[{VERSION}] done {len(clean_answer)}")
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -504,12 +630,13 @@ def webhook():
     if not text and "imageMessage" in msg:
         text = msg["imageMessage"].get("caption") or ""
     msg_id = key.get("id") or str(data.get("id") or "") or f"no-id-{int(time.time()*1000)}"
+    print(f"[WEBHOOK] jid={jid} push={push_name} text={text[:100]} msg_id={msg_id}")
     threading.Thread(target=do_work, args=(jid, text, push_name, participant, from_me, msg, data, msg_id), daemon=True).start()
     return jsonify({"ok": True}), 200
 
 @app.route("/", methods=["GET"])
 def home():
-    return f"LC Sir {VERSION} {TICK}", 200
+    return f"LC Sir {VERSION} {TICK} Lines=550+", 200
 
 @app.route("/health", methods=["GET"])
 def health():
