@@ -1,4 +1,4 @@
-# LC SIR V10.22 FULL - FIX CROSS-CHAT + USE √ + LID + BOX2D + TEXT OVERFLOW
+# LC SIR V10.23 FULL - V10.22 BASE + FIX FOLLOWUP ONLY
 from flask import Flask, request, jsonify
 import os, requests, re, base64, time, json, threading, io
 
@@ -8,7 +8,7 @@ EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "").strip().rstrip("/")
 EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
 
-VERSION = "V10.22-FIX-CROSS-CHAT-AND-SQRT-SYMBOL"
+VERSION = "V10.23-FIX-FOLLOWUP-SAME-AS-V10.22"
 STATE_FILE = "/tmp/group_state.json"
 
 def load_state():
@@ -26,16 +26,24 @@ GROUP_STATE = load_state()
 SEEN_IDS = {}
 LOCK = threading.Lock()
 GROUP_LOCKS = {}
+GROUP_HISTORY_IMAGE = {}  # 新增：jid -> {"b64":..., "mime":...} 用嚟記住上一張圖，解決追問語無倫次
 TICK = "✅"
 CROSS = "❌"
 print(f"BOOT {VERSION}")
-
 
 def get_group_lock(jid):
     with LOCK:
         if jid not in GROUP_LOCKS:
             GROUP_LOCKS[jid] = threading.Lock()
         return GROUP_LOCKS[jid]
+
+# 新增：判斷係咪追問短句
+def is_followup_text(t):
+    t = (t or "").strip()
+    if not t: return False
+    if len(t) > 90: return False
+    keys = ["正確寫法","應該係點樣","應該點樣","點寫","解釋","點解","再講","睇唔明","唔明","ya","Ya","must state","注意位","留低下位","點解啱","點解錯"]
+    return any(k in t for k in keys)
 
 SYSTEM_PROMPT = """
 You are LC Sir, HK DSE Math 專家，10年經驗，Friendly HK Cantonese，成日講 YA！DSE滿分Level！
@@ -221,7 +229,7 @@ def send_image(jid, image_input, caption):
     except Exception as e: print(f"[SEND IMG FAIL] {e}"); return False
 
 def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
-    my_jid = str(jid).strip()  # 鎖死自己個 jid，唔會串台
+    my_jid = str(jid).strip()
     my_msg_id = str(msg_id)
     try:
         print(f"[WORK START] jid={my_jid[-15:]} msg_id={my_msg_id} push={push_name}")
@@ -229,14 +237,14 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
             now=time.time()
             for k in list(SEEN_IDS.keys()):
                 if now-SEEN_IDS[k]>300: del SEEN_IDS[k]
-            seen_key = f"{my_jid}_{my_msg_id}"  # 每個聊天室獨立 dedup
+            seen_key = f"{my_jid}_{my_msg_id}"
             if seen_key in SEEN_IDS:
                 print(f"[WORK DUP] skip {seen_key}")
                 return
             SEEN_IDS[seen_key]=now
         
         group_lock = get_group_lock(my_jid)
-        with group_lock:  # 同一個學生/Group，排隊做，唔會調亂
+        with group_lock:
             stop_typing=threading.Event()
             threading.Thread(target=send_typing, args=(my_jid, stop_typing), daemon=True).start()
 
@@ -283,8 +291,30 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
             elif is_pdf:
                 b64,mime=get_file_base64(data, True); text=(text or "呢份PDF逐題改晒").strip(); mime="application/pdf"
             
+            # ===== 唯一新增的修復：追問時用返舊圖 =====
+            if not b64 and is_followup_text(text):
+                hist = GROUP_HISTORY_IMAGE.get(my_jid)
+                if hist and hist.get("b64"):
+                    print(f"[FOLLOWUP FIX] jid={my_jid[-10:]} 用返上一張圖")
+                    b64 = hist["b64"]
+                    mime = hist.get("mime","image/jpeg")
+                    text = f"學生睇完你圈嘅位，追問：{text}。請根據上一張功課圖解釋正確寫法，MUST講返同一題，唔准作新題目如 √(x+3)=5，如果圖係三角學就講三角學。"
+                else:
+                    print(f"[FOLLOWUP FIX] 無舊圖，叫學生重發")
+                    stop_typing.set()
+                    send_text(my_jid, "可唔可以將頭先嗰題影多次俾我睇下呀？我幫你逐行睇正確寫法呀～")
+                    return
+
             if not text and not b64: stop_typing.set(); return
             if (is_image or is_pdf) and not b64: stop_typing.set(); send_text(my_jid, "份file仲 load 緊，麻煩再send多次 🙏"); return
+
+            # 記住上一張圖，俾下次追問用
+            if b64:
+                GROUP_HISTORY_IMAGE[my_jid] = {"b64": b64, "mime": mime, "time": time.time()}
+                # 清理舊嘅，唔爆 RAM
+                if len(GROUP_HISTORY_IMAGE) > 50:
+                    oldest = sorted(GROUP_HISTORY_IMAGE.items(), key=lambda x: x[1].get("time",0))[0][0]
+                    del GROUP_HISTORY_IMAGE[oldest]
 
             answer,status=call_gemini(text, b64, mime); stop_typing.set()
             if not answer or len(answer.strip())<50: answer="收到喇，LC Sir 幫你睇緊先 YA～"
