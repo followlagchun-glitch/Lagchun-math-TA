@@ -63,8 +63,8 @@ You are LC Sir, Hong Kong DSE Math 專家，團隊 LC Math，10年經驗。Frien
 - 唔同Q分開出，禁止大拼圖
 
 === 鐵律5：紅圈+藍字批改 ===
-- 有錯就出：ANNOTATIONS_JSON: [{"x":0.42,"y":0.35,"text":"((3.0625-1)/1)*100% =206.25%"}]
-- text就係你要寫喺圖上面嘅藍字，英文簡短60字內，係正確做法
+- 有錯就出：ANNOTATIONS_JSON: [{"x":0.42,"y":0.35,"text":"w_new = w / 0.9, Correct: w/0.9 not w*0.9"}]
+- text必須係英文+數字+符號，ASCII ONLY，嚴禁√ ² 等符號，用 sqrt 代替√，用 * / 代替×÷，60字內，係正確做法
 
 === 鐵律6：PDF一定要改晒所有題，死命令 ===
 - 如果收到PDF有5頁，入面有Q1 Q2 Q3 Q4 Q5，你必須由Q1改到Q5，一題都唔可以漏！
@@ -178,27 +178,48 @@ def create_annotated_image(original_b64, annotations):
         draw=ImageDraw.Draw(img)
         w,h=img.size
         if not annotations:
-            draw.ellipse([w*0.15,h*0.3,w*0.85,h*0.6], outline="red", width=8)
-        else:
-            for ann in annotations[:6]:
-                try:
-                    cx,cy=int(w*float(ann.get("x",0.5))),int(h*float(ann.get("y",0.5)))
-                    r=int(min(w,h)*0.08)
-                    txt=ann.get("text","")
-                    draw.ellipse([cx-r-5,cy-r-5,cx+r+5,cy+r+5], outline="yellow", width=4)
-                    draw.ellipse([cx-r,cy-r,cx+r,cy+r], outline="red", width=6)
-                    if txt and ENABLE_COMMENTS:
-                        try:
-                            fnt=ImageFont.load_default()
-                            # 白底藍字
-                            tx=cx+r+8; ty=cy-r
-                            bbox=draw.textbbox((tx,ty), txt[:60], font=fnt)
-                            draw.rectangle([bbox[0]-4,bbox[1]-2,bbox[2]+4,bbox[3]+2], fill="white", outline="blue", width=2)
-                            draw.text((tx,ty), txt[:60], fill="blue", font=fnt)
-                        except: pass
-                except: continue
+            return None
+        # 搵最大字體
+        try:
+            font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+            font_big = ImageFont.truetype(font_path, int(h*0.038))
+            font_mid = ImageFont.truetype(font_path, int(h*0.032))
+        except:
+            font_big = ImageFont.load_default()
+            font_mid = ImageFont.load_default()
+
+        for ann in annotations[:4]:
+            try:
+                x=float(ann.get("x",0.5)); y=float(ann.get("y",0.5))
+                raw_txt=ann.get("text","").strip()
+                if not (0.05 < x < 0.95 and 0.05 < y < 0.95): continue
+                cx,cy=int(w*x),int(h*y)
+                r=int(min(w,h)*0.09)
+                # 黃底紅圈，更加突出
+                draw.ellipse([cx-r-7,cy-r-7,cx+r+7,cy+r+7], outline=(255,235,0), width=7)
+                draw.ellipse([cx-r,cy-r,cx+r,cy+r], outline=(220,20,20), width=7)
+
+                if raw_txt and ENABLE_COMMENTS:
+                    # 清理亂碼：轉做ASCII
+                    txt = raw_txt.replace("√","sqrt").replace("²","^2").replace("³","^3").replace("×","*").replace("÷","/").replace("，",",")
+                    txt = ''.join(c for c in txt if ord(c) < 128)
+                    txt = txt[:75].strip()
+                    if not txt: continue
+                    # 靚字排版：放頂部或底部，唔遮圈
+                    if y < 0.5:
+                        tx = int(w*0.04); ty = int(h*0.88)
+                    else:
+                        tx = int(w*0.04); ty = int(h*0.04)
+                    bbox = draw.textbbox((tx,ty), txt, font=font_big)
+                    # 白底藍框，加陰影感
+                    draw.rectangle([bbox[0]-12,bbox[1]-10,bbox[2]+12,bbox[3]+10], fill=(255,255,255), outline=(15,76,185), width=4)
+                    draw.rectangle([bbox[0]-10,bbox[1]-8,bbox[2]+10,bbox[3]+8], fill=(245,248,255))
+                    draw.text((tx,ty), txt, fill=(10,40,160), font=font_big)
+            except Exception as e:
+                print(f"[ANN INNER] {e}")
+                continue
         buf=io.BytesIO()
-        img.save(buf,"JPEG",quality=92)
+        img.save(buf,"JPEG",quality=96)
         return base64.b64encode(buf.getvalue()).decode()
     except Exception as e:
         print(f"[ANNOTATE] {e}")
