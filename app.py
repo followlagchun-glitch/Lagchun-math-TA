@@ -33,7 +33,7 @@ print(f"BOOT {VERSION}")
 # 加喺 GROUP_STATE 下面
 GROUP_HISTORY = {} # jid -> {text, answer, time}
 
-def do_work(jid, text, ...):
+def do_work(jid, text):
     my_jid = str(jid).strip()
     
     # 1. 攞返上一次嘅功課
