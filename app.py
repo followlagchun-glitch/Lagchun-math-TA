@@ -1,3 +1,6 @@
+# LC SIR V10-HANDWRITTEN-GROWTH - 成長版母體 2026-10-26
+# 進化史: V1 PDF全改 -> V8 紅圈 -> V9 藍字亂碼修復 -> V10 手寫大字+記憶成長
+# 以後每次更新，請用此份作基礎，只加功能，不重寫
 from flask import Flask, request, jsonify
 import os, requests, re, urllib.parse, base64, time, json, threading, io
 app = Flask(__name__)
@@ -7,7 +10,10 @@ EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
 TEACHER_NUMBERS = ["85246447827"]
 
+VERSION = "V10-HANDWRITTEN-GROWTH-BIG-FONT"
 STATE_FILE = "/tmp/group_state.json"
+MEMORY_FILE = "/tmp/lc_memory.json"  # 成長記憶
+
 def load_state():
     try:
         if os.path.exists(STATE_FILE):
@@ -22,7 +28,23 @@ def save_state():
     except Exception as e:
         print(f"[SAVE_STATE] err {e}")
 
+def load_memory():
+    try:
+        if os.path.exists(MEMORY_FILE):
+            with open(MEMORY_FILE, "r") as f:
+                return json.load(f)
+    except: pass
+    return []
+
+def save_memory(mem):
+    try:
+        # 只留最近100條對話做成長養分
+        with open(MEMORY_FILE, "w") as f:
+            json.dump(mem[-100:], f)
+    except: pass
+
 GROUP_STATE = load_state()
+LC_MEMORY = load_memory()
 SEEN_IDS = {}
 LOCK = threading.Lock()
 
@@ -30,7 +52,7 @@ TICK = "\u2705"
 CROSS = "\u274c"
 ENABLE_COMMENTS = True
 
-print(f"BOOT FINAL-IMAGE-ONLY len={len(GEMINI_API_KEY)}")
+print(f"BOOT {VERSION} len={len(GEMINI_API_KEY)} memory={len(LC_MEMORY)}")
 
 SYSTEM_PROMPT = """
 You are LC Sir, Hong Kong DSE Math 專家，團隊 LC Math，10年經驗。Friendly, HK Cantonese。
@@ -177,19 +199,14 @@ def create_annotated_image(original_b64, annotations):
         img=Image.open(io.BytesIO(img_data)).convert("RGB")
         draw=ImageDraw.Draw(img)
         w,h=img.size
-        if not annotations:
-            return None
-        
-        # === 加大+手寫風核心 ===
+        if not annotations: return None
         try:
             font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-            # 之前 0.038 太細，而家 0.07 超大，手寫感
             font_big = ImageFont.truetype(font_path, int(h*0.068))
             font_mid = ImageFont.truetype(font_path, int(h*0.052))
         except:
             font_big = ImageFont.load_default()
             font_mid = ImageFont.load_default()
-
         for ann in annotations[:3]:
             try:
                 x=float(ann.get("x",0.5)); y=float(ann.get("y",0.5))
@@ -197,18 +214,13 @@ def create_annotated_image(original_b64, annotations):
                 if not (0.03 < x < 0.97 and 0.03 < y < 0.97): continue
                 cx,cy=int(w*x),int(h*y)
                 r=int(min(w,h)*0.12)
-                # 超粗紅黃圈，似老師紅筆
                 draw.ellipse([cx-r-10,cy-r-10,cx+r+10,cy+r+10], outline=(255,235,0), width=10)
                 draw.ellipse([cx-r,cy-r,cx+r,cy+r], outline=(220,0,0), width=10)
-
                 if raw_txt and ENABLE_COMMENTS:
                     txt = raw_txt.replace("√","sqrt").replace("²","^2").replace("×","*").replace("÷","/").replace("，",",")
                     txt = ''.join(c for c in txt if ord(c) < 128)[:90].strip()
                     if not txt: continue
-
-                    # 智能分兩行，字更大
                     if len(txt) > 32:
-                        # 搵逗號或空格斷
                         cut = txt.find(",", 15)
                         if cut==-1: cut = txt.find(" ", 20)
                         if cut==-1: cut = len(txt)//2
@@ -216,11 +228,8 @@ def create_annotated_image(original_b64, annotations):
                         line2 = txt[cut+1:].strip()
                     else:
                         line1 = txt; line2 = ""
-
-                    # 放喺空白位，唔遮圈
                     tx = int(w*0.06)
                     ty = int(h*0.08) if y>0.5 else int(h*0.72)
-
                     bbox1 = draw.textbbox((tx,ty), line1, font=font_big)
                     if line2:
                         bbox2 = draw.textbbox((tx, ty + (bbox1[3]-bbox1[1]) + 12), line2, font=font_mid)
@@ -228,19 +237,14 @@ def create_annotated_image(original_b64, annotations):
                         x2 = max(bbox1[2], bbox2[2]); y2 = bbox2[3]
                     else:
                         x1,y1,x2,y2 = bbox1
-
                     pad = 22
-                    # 手寫便條效果：黃底+藍框+陰影
                     draw.rounded_rectangle([x1-pad+4, y1-pad+4, x2+pad+4, y2+pad+4], radius=16, fill=(0,0,0,60))
                     draw.rounded_rectangle([x1-pad, y1-pad, x2+pad, y2+pad], radius=16, fill=(255,252,180), outline=(20,70,180), width=6)
-                    # 藍原子筆手寫字
                     draw.text((tx,ty), line1, fill=(10,30,160), font=font_big)
                     if line2:
                         draw.text((tx, ty + (bbox1[3]-bbox1[1]) + 12), line2, fill=(10,30,160), font=font_mid)
-
             except Exception as e:
                 print(f"[ANN INNER] {e}"); continue
-
         buf=io.BytesIO()
         img.save(buf,"JPEG",quality=96)
         return base64.b64encode(buf.getvalue()).decode()
@@ -299,6 +303,7 @@ def download_combined_graph(equations_list, out_path="/tmp/combined.jpg"):
     return None
 
 def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
+    global LC_MEMORY
     with LOCK:
         now=time.time()
         for k in list(SEEN_IDS.keys()):
@@ -391,15 +396,20 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
     
     send_text(jid, clean_answer)
 
-    is_image_homework = is_image_msg
+    # 成長記憶 - 記錄對話養份
+    try:
+        with LOCK:
+            LC_MEMORY.append({"t":int(time.time()), "q":text[:200], "a":clean_answer[:300], "jid":jid})
+            save_memory(LC_MEMORY)
+    except: pass
 
+    is_image_homework = is_image_msg
     if is_image_homework:
         if b64 and mime!="application/pdf" and CROSS in clean_answer:
             img_b64=create_annotated_image(b64, annotations)
             if img_b64:
                 time.sleep(0.6)
                 send_image(jid, img_b64, f"{CROSS} 睇圖，紅圈就係錯嘅位")
-
         if graphs or full_q_graphs:
             from collections import defaultdict
             q_map = defaultdict(list)
@@ -410,10 +420,8 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
                     eq=eq.strip().split("|")[0].strip()
                     if len(eq)>2:
                         q_map["Q1"].append(eq)
-
             for q_label, eq_list in q_map.items():
-                uniq=[]
-                seen=set()
+                uniq=[]; seen=set()
                 for e in eq_list:
                     k=e.replace(" ","")
                     if k not in seen and len(e)>2:
@@ -428,7 +436,7 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
                     send_text(jid, f"{q_label} 互動版:\n{desmos_url}")
     else:
         if graphs or full_q_graphs:
-            print(f"[SKIP GRAPH+ANNOTATION] PDF/文字功課，唔出圖，避免大拼圖")
+            print(f"[SKIP GRAPH+ANNOTATION] PDF/文字功課，唔出圖")
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -448,8 +456,10 @@ def webhook():
     return jsonify({"ok": True}), 200
 
 @app.route("/", methods=["GET"])
-def home(): return f"LC Sir FINAL-IMAGE-ONLY {TICK} len={len(GEMINI_API_KEY)}", 200
+def home(): return f"LC Sir {VERSION} {TICK} mem={len(LC_MEMORY)} len={len(GEMINI_API_KEY)}", 200
 @app.route("/health", methods=["GET"])
 def health(): return "ok", 200
+@app.route("/memory", methods=["GET"])
+def memory_view(): return jsonify({"version":VERSION, "count":len(LC_MEMORY), "last":LC_MEMORY[-5:]}), 200
 if __name__=="__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
