@@ -1,4 +1,4 @@
-# LC SIR V10.7 FULL MOTHER - V10母體完整還原 + 2026最新Model + 練線修復
+# LC SIR V10.8 3.5-ONLY - V10母體完整版 + 鎖死Gemini 3.5
 from flask import Flask, request, jsonify
 import os, requests, re, base64, time, json, threading, io
 
@@ -10,7 +10,7 @@ EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
 TEACHER_NUMBERS = ["85246447827"]
 
-VERSION = "V10.7-FULL-MOTHER-2026"
+VERSION = "V10.8-3.5-ONLY-FULL-MOTHER"
 STATE_FILE = "/tmp/group_state.json"
 MEMORY_FILE = "/tmp/lc_memory.json"
 
@@ -30,10 +30,6 @@ def load_memory():
             with open(MEMORY_FILE, "r") as f: return json.load(f)
     except: pass
     return []
-def save_memory(mem):
-    try:
-        with open(MEMORY_FILE, "w") as f: json.dump(mem[-100:], f)
-    except: pass
 
 GROUP_STATE = load_state()
 LC_MEMORY = load_memory()
@@ -41,43 +37,30 @@ SEEN_IDS = {}
 LOCK = threading.Lock()
 TICK = "\u2705"
 CROSS = "\u274c"
-ENABLE_COMMENTS = True
 
-print(f"BOOT {VERSION} len={len(GEMINI_API_KEY)} mem={len(LC_MEMORY)}")
+print(f"BOOT {VERSION} len={len(GEMINI_API_KEY)}")
 
 SYSTEM_PROMPT = """
 You are LC Sir, Hong Kong DSE Math 專家，團隊 LC Math，10年經驗。Friendly, HK Cantonese，成日講 YA！DSE滿分Level！
 
-鐵律0：絕對一致性 - 判斷只有一次，一開頭話 ❌，成段都要保持係 ❌，唔可以前後矛盾，Q33 ❌ 就全段都係錯
-
-鐵律1：NEVER LATEX - 絕對唔可以用 $ $ $$ $$ \\( \\) \\frac \\sqrt \\times 等LaTeX，全部用普通文字，例如 x^2, (a+b)/2, k <= 0
-
-鐵律2：繁體廣東話+英文term - MUST繁體中文ONLY，口語：係, 唔係, 睇下, 呢題, 錯咗, 叻仔, 呢步, 記住，數學名詞用英文
-
+鐵律0：絕對一致性 - 判斷只有一次，一開頭話 ❌，成段都要保持係 ❌，唔可以前後矛盾
+鐵律1：NEVER LATEX - 絕對唔可以用 $ $ $$ \\( \\) \\frac \\le \\ge \\sqrt \\times，全部用普通文字，例如 x^2, (a+b)/2, k <= 0, x <= -9
+鐵律2：繁體廣東話+英文term - MUST繁體中文ONLY，口語：係, 唔係, 睇下, 呢題, 錯咗, 叻仔
 鐵律3：一開頭定生死 - MUST用 Q+number 開頭，例如 Q33 ❌ 呢題唔啱 / Q33 ✅ 呢題啱晒！肯定啱！DSE滿分Level！YA
-
-鐵律4：改功課（有手寫相）絕對唔出 GRAPH_EQUATION，問問題先出圖，PDF一定要改晒所有題
-
-鐵律5：紅圈+藍字+練線 - 有圖就一定要出 ANNOTATIONS_JSON: [{"x":0.42,"y":0.35,"text":"k<=0 wrong, test (0,0) vertex","x2":0.55,"y2":0.5}] 英文ONLY，如果要畫線就加 x2 y2
-
-鐵律6：人性化批改格式 - 一定要跟呢個：
+鐵律4：改功課（有手寫相）絕對唔出 GRAPH_EQUATION
+鐵律5：紅圈+藍字+練線 - ANNOTATIONS_JSON: [{"x":0.42,"y":0.35,"text":"check boundary, x<=-9 wrong","x2":0.55,"y2":0.5}] 英文ONLY
+鐵律6：PDF一定要改晒所有題，一題都唔可以漏
+鐵律7：人性化批改格式：
 *錯喺邊*：...
 *點諗*：...
 *正確*：...
 💡 DSE伏位：...
-
-鐵律7：Desmos白圖封鎖 - 功課圖絕對唔可以出 Desmos 圖
 """
 
-# V10.7 2026年10月新Key實測可用，舊 2.0/1.5/2.5已shutdown
+# 鎖死只用 3.5，V10其他功能不變
 MODELS = [
     "gemini-3.5-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-3-flash",
-    "gemini-flash-latest",
-    "gemini-flash-lite-latest",
-    "gemini-3.1-flash",
-    "gemini-3.1-pro-preview"
+    "gemini-3.5-flash-lite"
 ]
 
 def clean_b64(b64):
@@ -116,27 +99,26 @@ def get_file_base64(data, is_pdf=False):
 
 def call_gemini(question, file_b64=None, mime_type="image/jpeg"):
     prompt=SYSTEM_PROMPT+f"\n\n學生: {question}\n記住：繁體、Q開頭、一致性、唔出Latex、有相就出ANNOTATIONS_JSON"
-    for retry in range(2):
-        for model in MODELS:
-            url=f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-            headers={"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY}
-            parts=[{"text": prompt}]
-            if file_b64: parts.append({"inlineData": {"mimeType": mime_type, "data": file_b64}})
-            body={"contents": [{"role": "user", "parts": parts}], "generationConfig": {"temperature": 0.3, "maxOutputTokens": 3500}}
-            try:
-                r=requests.post(url, json=body, headers=headers, timeout=90)
-                print(f"[GEMINI TRY] {model} status {r.status_code}")
-                if r.status_code==200:
-                    txt=r.json()["candidates"][0]["content"]["parts"][0]["text"]
-                    print(f"[GEMINI OK] {model}")
-                    return txt, "ok"
-                elif r.status_code==429:
-                    time.sleep(4); continue
-                else:
-                    print(f"[GEMINI FAIL] {model} {r.text[:800]}")
-            except Exception as e:
-                print(f"[GEMINI EXC] {model} {e}")
-        time.sleep(1)
+    for model in MODELS:
+        url=f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        headers={"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY}
+        parts=[{"text": prompt}]
+        if file_b64: parts.append({"inlineData": {"mimeType": mime_type, "data": file_b64}})
+        body={"contents": [{"role": "user", "parts": parts}], "generationConfig": {"temperature": 0.2, "maxOutputTokens": 3500}}
+        try:
+            r=requests.post(url, json=body, headers=headers, timeout=90)
+            print(f"[GEMINI TRY] {model} {r.status_code}")
+            if r.status_code==200:
+                txt=r.json()["candidates"][0]["content"]["parts"][0]["text"]
+                # 3.5 專用強制洗LaTeX
+                txt = txt.replace("\\le","<=").replace("\\ge",">=").replace("\\ne","!=").replace("\\times","x").replace("\\","")
+                txt = re.sub(r"\$+", "", txt)
+                print(f"[GEMINI OK] {model}")
+                return txt, "ok"
+            else:
+                print(f"[GEMINI FAIL] {model} {r.text[:600]}")
+        except Exception as e:
+            print(f"[GEMINI EXC] {model} {e}")
     return f"@Lc 暫時連唔到，轉頭再試", "error"
 
 def send_typing(jid, stop_event):
@@ -155,8 +137,8 @@ def send_text(jid, text):
     headers={"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
     try:
         text = re.sub(r"\$+.*?\$+", "", text)
-        if not text.strip():
-            text = "睇到你份功課喇，幫你望下～"
+        text = text.replace("**","")
+        if not text.strip(): text="睇到你份功課喇"
         for i in range(0, len(text), 2800):
             chunk=text[i:i+2800]
             requests.post(url, json={"number": jid, "text": chunk}, headers=headers, timeout=20)
@@ -185,19 +167,18 @@ def create_annotated_image(original_b64, annotations):
                 raw_txt=ann.get("text","").strip()
                 if not (0.02 < x < 0.98 and 0.02 < y < 0.98): continue
                 cx,cy=int(w*x),int(h*y)
-                # 練線
                 if x2 is not None and y2 is not None:
                     try:
                         x2=float(x2); y2=float(y2)
                         if 0.02 < x2 < 0.98 and 0.02 < y2 < 0.98:
                             cx2,cy2=int(w*x2),int(h*y2)
                             draw.line([cx,cy,cx2,cy2], fill=(210,0,0), width=max(3,int(min(w,h)*0.008)))
-                            draw.ellipse([cx2-7,cy2-7,cx2+7,cy2+7], fill=(210,0,0))
+                            draw.ellipse([cx2-6,cy2-6,cx2+6,cy2+6], fill=(210,0,0))
                     except: pass
                 r=int(min(w,h)*0.042)
                 draw.ellipse([cx-r-4,cy-r-4,cx+r+4,cy+r+4], outline=(255,230,0), width=4)
                 draw.ellipse([cx-r,cy-r,cx+r,cy+r], outline=(210,0,0), width=4)
-                if raw_txt and ENABLE_COMMENTS:
+                if raw_txt:
                     txt = ''.join(c for c in raw_txt if ord(c) < 128)[:32].strip()
                     if not txt: continue
                     tx = cx + r + 14; ty = cy - 8
@@ -230,7 +211,6 @@ def send_image(jid, image_input, caption):
             payload={"number": jid, "mediatype": "image", "media": b64_data, "caption": caption, "fileName": f"marked_{int(time.time())}.jpg"}
             r=requests.post(url, json=payload, headers=headers, timeout=40)
             if r.status_code in [200,201]: return True
-            print(f"sendImage fail {r.status_code} {r.text[:500]}")
         except Exception as e:
             print(f"sendImage exc {e}")
         time.sleep(2)
@@ -302,20 +282,16 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
                 txt=m_ann.group(1).replace("'","\"")
                 annotations=json.loads(txt)
             except: annotations=[]
-    # V10母體兩步走：保留完整文字批改
     clean_answer=re.sub(r"GRAPH_EQUATION.*", "", answer, flags=re.DOTALL).strip()
     clean_answer=re.sub(r"ANNOTATIONS_JSON:.*", "", clean_answer, flags=re.DOTALL).strip()
     clean_answer=re.sub(r"```.*?```", "", clean_answer, flags=re.DOTALL).strip()
     if not clean_answer or len(clean_answer) < 20:
         clean_answer = answer.split("ANNOTATIONS_JSON")[0].split("GRAPH_EQUATION")[0].strip()
     clean_answer=re.sub(r"\$+.*?\$+", "", clean_answer).strip()
-    if not clean_answer:
-        clean_answer = "睇到你份功課喇，幫你望下～"
+    if not clean_answer: clean_answer="睇到你份功課喇"
     if "@g.us" in jid and push_name and not clean_answer.startswith(f"@{push_name}"):
         clean_answer=f"@{push_name} {clean_answer}"
-    # 第一步：先出文字批改（V10母體核心）
     send_text(jid, clean_answer)
-    # 第二步：再出紅圈練線圖
     if is_image_msg and b64 and mime!="application/pdf" and annotations:
         time.sleep(1)
         img_b64=create_annotated_image(b64, annotations)
