@@ -1,4 +1,4 @@
-# LC SIR V10.3-NO-DESMOS-CANTONESE-HANDWRITE - 斬白圖+廣東話手寫
+# LC SIR V10.4-HUMAN-BACK-FIXED - 用返V10人性化+修復亂碼+斬白圖
 from flask import Flask, request, jsonify
 import os, requests, re, urllib.parse, base64, time, json, threading, io, random
 app = Flask(__name__)
@@ -8,63 +8,89 @@ EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
 TEACHER_NUMBERS = ["85246447827"]
 
-VERSION = "V10.3-NO-DESMOS-CANTON-HANDWRITE"
+VERSION = "V10.4-HUMAN-BACK-NO-DESMOS"
 STATE_FILE = "/tmp/group_state.json"
 MEMORY_FILE = "/tmp/lc_memory.json"
 
 def load_state():
     try:
         if os.path.exists(STATE_FILE):
-            with open(STATE_FILE, "r") as f:
-                return json.load(f)
+            with open(STATE_FILE, "r") as f: return json.load(f)
     except: pass
     return {}
 def save_state():
     try:
-        with open(STATE_FILE, "w") as f:
-            json.dump(GROUP_STATE, f)
-    except Exception as e:
-        print(f"[SAVE_STATE] err {e}")
-
+        with open(STATE_FILE, "w") as f: json.dump(GROUP_STATE, f)
+    except: pass
 def load_memory():
     try:
         if os.path.exists(MEMORY_FILE):
-            with open(MEMORY_FILE, "r") as f:
-                return json.load(f)
+            with open(MEMORY_FILE, "r") as f: return json.load(f)
     except: pass
     return []
 def save_memory(mem):
     try:
-        with open(MEMORY_FILE, "w") as f:
-            json.dump(mem[-100:], f)
+        with open(MEMORY_FILE, "w") as f: json.dump(mem[-100:], f)
     except: pass
 
 GROUP_STATE = load_state()
 LC_MEMORY = load_memory()
-SEEN_IDS = {}
-LOCK = threading.Lock()
-
-TICK = "\u2705"
-CROSS = "\u274c"
+SEEN_IDS = {}; LOCK = threading.Lock()
+TICK = "\u2705"; CROSS = "\u274c"
 ENABLE_COMMENTS = True
-
 print(f"BOOT {VERSION} mem={len(LC_MEMORY)}")
 
+# 用返 V10 母體完整鐵律，人性化！
 SYSTEM_PROMPT = """
-You are LC Sir, Hong Kong DSE Math 專家。廣東話+英文term，真人老師語氣。
-=== 鐵律5：紅圈+廣東話手寫 ===
-- 改功課時，有錯就出：ANNOTATIONS_JSON: [{"x":0.52,"y":0.41,"text":"呢度k≤0錯，試vertex (0,0)"}]
-- text MUST係 廣東話+英文term，15字內，似真人手寫
-- 例子：呢度錯，睇錯region / 試 (0,0) 入 inequality / k值計錯
-- 唔好出長句，唔好出英文長句
+You are LC Sir, Hong Kong DSE Math 專家，團隊 LC Math，10年經驗。Friendly, HK Cantonese，成日講 YA！DSE滿分Level！
+=== 鐵律0：絕對一致性 ===
+- 判斷只有一次，一開頭話 ❌，成段都要保持係 ❌，唔可以中途話其實啱
+- 禁止出現「等等...」「哎呀」「其實又啱」「不過」
 
-=== 鐵律：改功課唔出圖 ===
-- 如果係改功課（有手寫相），絕對唔出 GRAPH_EQUATION，唔出 Desmos，唔出視像化
-- 問問題（冇手寫）先可以出 GRAPH_EQUATION
+鐵律2.5：分數寫法 11又1/9% 或 11.1% 都當 ✅
 
 === 鐵律1：NEVER LATEX ===
-=== 鐵律2：繁體廣東話為主，term用英文：vertex, region, boundary, inequality ===
-=== 鐵律3：Q第一行講結果 ===
+- NEVER用 $ $ $$ $$ \\( \\) \\[ \\] \\frac \\text \\sqrt \\^
+- 只能用靚Unicode：² ³ √ ½ ¼ ¾ × ÷
+- y = (x+9)/2, h² = 100 - 9 = 91, h = √91
+
+=== 鐵律2：繁體廣東話+英文term ===
+- MUST繁體中文ONLY，口語：係, 唔係, 睇下, 呢題，technical用英文：vertex, region, boundary, inequality, k-value
+- NEVER簡體
+
+=== 鐵律3：一開頭定生死 ===
+- 改功課模式，每條Q第一行必須直接講結果
+- 錯：Q33 ❌ 呢題唔啱，k≤0嗰度錯咗！試下 vertex (0,0) 啦！
+- 啱：Q33 ✅ 呢題啱晒！肯定啱！DSE滿分Level！YA！
+
+=== 鐵律4：分題出圖，標明Q - 問問題先出圖 ===
+- 改功課（有手寫相）絕對唔出 GRAPH_EQUATION，唔出 Desmos
+- 問問題（冇手寫）先可以出：GRAPH_EQUATION Q1: y=x+1
+
+=== 鐵律5：紅圈+藍字批改 - 唔可以亂碼 ===
+- 有錯就出：ANNOTATIONS_JSON: [{"x":0.42,"y":0.35,"text":"k<=0 wrong, test (0,0) vertex"}]
+- text MUST係 英文+數字+符號 ONLY，ASCII ONLY，嚴禁中文，嚴禁√²，15字內，越短越好，唔會亂碼
+- 例子：II wrong region / check L1 / k error
+
+=== 鐵律6：PDF一定要改晒所有題，死命令 ===
+- 有幾多題改幾多題，一題都唔可以漏！每題獨立一段
+
+分兩個模式：
+模式A - 問問題 (冇手寫)：
+*題目拆解*：DSE咩課題
+*DSE概念*：考咩
+*技巧*：點諗
+*點做*：1. 2.
+*答案*：...
+💡 DSE伏位：同學成日睇錯 region 方向，記住 test (0,0) 呀！
+GRAPH_EQUATION Q1: ...
+
+模式B - 改功課 (有手寫) - 必須改晒所有題，人性化：
+Q33 ❌ 呢題唔啱呀！II同III揀錯咗！
+*錯喺邊*：你 L1 條線 h-2k+9=0 方向搞錯，k≤0 嗰個唔啱
+*點諗*：試下 (h,k)=(0,0)，入返去 -2(0)+9=9≥0，應該係 h≥2k-9 呀
+*正確*：所以 I,II,III 全部 true，答案 D 呀！下次小心睇 region 同 boundary 呀！
+💡 DSE伏位：inequality 轉方向成日中伏，記住試 vertex！
 """
 
 MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"]
@@ -148,34 +174,14 @@ def create_annotated_image(original_b64, annotations):
         draw=ImageDraw.Draw(img)
         w,h=img.size
         if not annotations: return None
-
-        # 搵中文字體，支援廣東話手寫
-        font = None
-        font_paths = [
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/noto/NotoSansSC-Regular.otf",
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        ]
-        font_size = int(h*0.028)  # 廣東話要大少先睇到
-        for fp in font_paths:
-            if os.path.exists(fp):
-                try:
-                    font = ImageFont.truetype(fp, font_size)
-                    break
-                except: continue
-        if not font:
+        try:
+            # V10.4：用返唔會亂碼嘅英文斜體，細字
+            fp = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf"
+            if not os.path.exists(fp): fp = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+            font_size = int(h*0.022)  # V10 話太大，V10.3 太細，V10.4 取中間
+            font = ImageFont.truetype(fp, font_size)
+        except:
             font = ImageFont.load_default()
-
-        def draw_handwrite_cantonese(x, y, text):
-            cur_x = x
-            for ch in text:
-                jx = random.randint(-1,1)
-                jy = random.randint(-1,1)
-                draw.text((cur_x+jx, y+jy), ch, fill=(20,60,160), font=font)
-                bbox = draw.textbbox((0,0), ch, font=font)
-                cur_x += (bbox[2]-bbox[0]) * 0.95
 
         for ann in annotations[:3]:
             try:
@@ -183,25 +189,25 @@ def create_annotated_image(original_b64, annotations):
                 raw_txt=ann.get("text","").strip()
                 if not (0.02 < x < 0.98 and 0.02 < y < 0.98): continue
                 cx,cy=int(w*x),int(h*y)
-                r=int(min(w,h)*0.038)
-                # 細紅圈，準
-                draw.ellipse([cx-r-2,cy-r-2,cx+r+2,cy+r+2], outline=(255,230,0), width=3)
+                r=int(min(w,h)*0.038)  # 細圈，唔疊
+                draw.ellipse([cx-r-3,cy-r-3,cx+r+3,cy+r+3], outline=(255,230,0), width=3)
                 draw.ellipse([cx-r,cy-r,cx+r,cy+r], outline=(210,0,0), width=3)
 
                 if raw_txt and ENABLE_COMMENTS:
-                    # V10.3：保留中文，唔濾走
-                    txt = raw_txt[:25].strip()
+                    # V10.4：強制 ASCII，唔會再有 □□ 亂碼
+                    txt = ''.join(c for c in raw_txt if ord(c) < 128)[:28].strip()
                     if not txt: continue
                     tx = cx + r + 10
-                    ty = cy - 6
-                    if tx + 200 > w: tx = max(5, cx - r - 180)
+                    ty = cy - 5
+                    if tx + 180 > w: tx = max(5, cx - r - 160)
                     if ty < 5: ty = cy + r + 6
                     bbox = draw.textbbox((tx,ty), txt, font=font)
-                    pad=6
+                    pad=5
                     draw.rounded_rectangle([bbox[0]-pad, bbox[1]-pad, bbox[2]+pad, bbox[3]+pad], radius=6, fill=(255,255,255), outline=(50,100,200), width=1)
-                    draw_handwrite_cantonese(tx, ty, txt)
+                    # 輕微手寫抖動
+                    jx = random.randint(-1,1); jy = random.randint(-1,1)
+                    draw.text((tx+jx, ty+jy), txt, fill=(20,60,160), font=font)
             except: continue
-
         buf=io.BytesIO()
         img.save(buf,"JPEG",quality=92)
         return base64.b64encode(buf.getvalue()).decode()
@@ -221,8 +227,7 @@ def send_image(jid, image_input, caption):
         r=requests.post(url, json=payload, headers=headers, timeout=30)
         return r.status_code in [200,201]
     except Exception as e:
-        print(f"[SEND IMG] {e}")
-        return False
+        print(f"[SEND IMG] {e}"); return False
 
 def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
     global LC_MEMORY
@@ -292,33 +297,22 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
     if m_ann:
         try: annotations=json.loads(m_ann.group(1))
         except: pass
-
-    # V10.3：斬Desmos - 改功課模式強制清走 GRAPH_EQUATION
+    # V10.4：斬死 Desmos，改功課唔出圖
     clean_answer=re.sub(r"GRAPH_EQUATION.*", "", answer).strip()
     clean_answer=re.sub(r"ANNOTATIONS_JSON:.*", "", clean_answer, flags=re.DOTALL).strip()
     if "@g.us" in jid and push_name: clean_answer=f"@{push_name} {clean_answer}"
     send_text(jid, clean_answer)
-
     try:
         with LOCK:
             LC_MEMORY.append({"t":int(time.time()), "q":text[:200], "a":clean_answer[:300], "jid":jid})
             save_memory(LC_MEMORY)
     except: pass
-
-    # V10.3：改功課只出紅圈，唔出任何圖
     if is_image_msg:
         if b64 and mime!="application/pdf" and CROSS in clean_answer:
             img_b64=create_annotated_image(b64, annotations)
             if img_b64:
                 time.sleep(0.6)
                 send_image(jid, img_b64, f"{CROSS} 睇圖，紅圈就係錯嘅位")
-        # 完全唔出 Desmos 白圖
-        print(f"[V10.3] Homework mode, Desmos blocked")
-    else:
-        # 問問題模式先出圖（但都唔出白圖y=0）
-        graphs=re.findall(r"GRAPH_EQUATION(?:\s+Q\d+)?:\s*(.+)", answer)
-        if graphs:
-            print(f"[V10.3] Text question, skip graph for now to avoid white")
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
