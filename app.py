@@ -28,6 +28,7 @@ LOCK = threading.Lock()
 
 TICK = "\u2705"
 CROSS = "\u274c"
+ENABLE_COMMENTS = True
 
 print(f"BOOT FINAL-IMAGE-ONLY len={len(GEMINI_API_KEY)}")
 
@@ -61,8 +62,9 @@ You are LC Sir, Hong Kong DSE Math 專家，團隊 LC Math，10年經驗。Frien
 - 有兩條同Q： GRAPH_EQUATION Q1: y=x+1 和 GRAPH_EQUATION Q1: y=-2x+4 會合併
 - 唔同Q分開出，禁止大拼圖
 
-=== 鐵律5：紅圈標記 ===
-- 有錯就出：ANNOTATIONS_JSON: [{"x":0.5,"y":0.4}]
+=== 鐵律5：紅圈+藍字批改 ===
+- 有錯就出：ANNOTATIONS_JSON: [{"x":0.42,"y":0.35,"text":"((3.0625-1)/1)*100% =206.25%"}]
+- text就係你要寫喺圖上面嘅藍字，英文簡短60字內，係正確做法
 
 === 鐵律6：PDF一定要改晒所有題，死命令 ===
 - 如果收到PDF有5頁，入面有Q1 Q2 Q3 Q4 Q5，你必須由Q1改到Q5，一題都唔可以漏！
@@ -170,7 +172,7 @@ def send_text(jid, text):
 
 def create_annotated_image(original_b64, annotations):
     try:
-        from PIL import Image, ImageDraw
+        from PIL import Image, ImageDraw, ImageFont
         img_data=base64.b64decode(clean_b64(original_b64))
         img=Image.open(io.BytesIO(img_data)).convert("RGB")
         draw=ImageDraw.Draw(img)
@@ -182,7 +184,18 @@ def create_annotated_image(original_b64, annotations):
                 try:
                     cx,cy=int(w*float(ann.get("x",0.5))),int(h*float(ann.get("y",0.5)))
                     r=int(min(w,h)*0.08)
+                    txt=ann.get("text","")
+                    draw.ellipse([cx-r-5,cy-r-5,cx+r+5,cy+r+5], outline="yellow", width=4)
                     draw.ellipse([cx-r,cy-r,cx+r,cy+r], outline="red", width=6)
+                    if txt and ENABLE_COMMENTS:
+                        try:
+                            fnt=ImageFont.load_default()
+                            # 白底藍字
+                            tx=cx+r+8; ty=cy-r
+                            bbox=draw.textbbox((tx,ty), txt[:60], font=fnt)
+                            draw.rectangle([bbox[0]-4,bbox[1]-2,bbox[2]+4,bbox[3]+2], fill="white", outline="blue", width=2)
+                            draw.text((tx,ty), txt[:60], fill="blue", font=fnt)
+                        except: pass
                 except: continue
         buf=io.BytesIO()
         img.save(buf,"JPEG",quality=92)
@@ -327,7 +340,6 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
         except: pass
 
     graphs=re.findall(r"GRAPH_EQUATION(?:\s+Q\d+)?:\s*(.+)", answer)
-    # 兼容新格式 Q1: y=x+1
     full_q_graphs=re.findall(r"GRAPH_EQUATION\s+(Q\d+):\s*(.+)", answer, re.I)
     
     clean_answer=re.sub(r"GRAPH_EQUATION.*", "", answer).strip()
@@ -336,25 +348,20 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
     
     send_text(jid, clean_answer)
 
-    # === 紅圈 + 合併圖 只限相片功課 ===
     is_image_homework = is_image_msg
 
     if is_image_homework:
-        # 1. 紅圈
         if b64 and mime!="application/pdf" and CROSS in clean_answer:
             img_b64=create_annotated_image(b64, annotations)
             if img_b64:
                 time.sleep(0.6)
                 send_image(jid, img_b64, f"{CROSS} 睇圖，紅圈就係錯嘅位")
 
-        # 2. 合併圖 - 分Q出圖
         if graphs or full_q_graphs:
             from collections import defaultdict
             q_map = defaultdict(list)
-            # 處理 Q1: y=x+1 格式
             for q_label, eq in full_q_graphs:
                 q_map[q_label.upper()].append(eq.strip())
-            # 處理舊格式但冇Q的，當 Q1
             if graphs and not full_q_graphs:
                 for eq in graphs:
                     eq=eq.strip().split("|")[0].strip()
