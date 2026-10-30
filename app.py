@@ -1,4 +1,4 @@
-# LC SIR V10.24 FULL - V10.23 BASE + FIX FOLLOWUP + MATH FILTER
+# LC SIR V10.25 FULL - V10.24 + HISTORY PERSIST + FINAL FIX
 from flask import Flask, request, jsonify
 import os, requests, re, base64, time, json, threading, io
 
@@ -8,8 +8,9 @@ EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "").strip().rstrip("/")
 EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
 
-VERSION = "V10.24-FIX-FOLLOWUP-MATH-FILTER"
+VERSION = "V10.25-FIX-PERSIST-FOLLOWUP-MATH-FILTER"
 STATE_FILE = "/tmp/group_state.json"
+HISTORY_FILE = "/tmp/group_history.json"
 
 def load_state():
     try:
@@ -22,14 +23,31 @@ def save_state():
         with open(STATE_FILE, "w", encoding="utf-8") as f: json.dump(GROUP_STATE, f, ensure_ascii=False, indent=2)
     except: pass
 
+def load_history():
+    try:
+        if os.path.exists(HISTORY_FILE):
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f: return json.load(f)
+    except: pass
+    return {}
+def save_history():
+    try:
+        # 只存最近20個群，唔爆 /tmp
+        if len(GROUP_HISTORY_IMAGE) > 20:
+            sorted_items = sorted(GROUP_HISTORY_IMAGE.items(), key=lambda x: x[1].get("time",0))
+            for k,_ in sorted_items[:-20]:
+                del GROUP_HISTORY_IMAGE[k]
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f: json.dump(GROUP_HISTORY_IMAGE, f, ensure_ascii=False)
+    except Exception as e:
+        print(f"[HIST SAVE FAIL] {e}")
+
 GROUP_STATE = load_state()
+GROUP_HISTORY_IMAGE = load_history()
 SEEN_IDS = {}
 LOCK = threading.Lock()
 GROUP_LOCKS = {}
-GROUP_HISTORY_IMAGE = {}  # jid -> {"b64":..., "mime":..., "time":...}
 TICK = "✅"
 CROSS = "❌"
-print(f"BOOT {VERSION}")
+print(f"BOOT {VERSION} history={len(GROUP_HISTORY_IMAGE)}")
 
 def get_group_lock(jid):
     with LOCK:
@@ -37,7 +55,6 @@ def get_group_lock(jid):
             GROUP_LOCKS[jid] = threading.Lock()
         return GROUP_LOCKS[jid]
 
-# ============ NEW: 數學相關判斷 ============
 MATH_KEYWORDS = [
     "x=", "y=", "√", "sqrt", "sin", "cos", "tan", "log", "ln",
     "方程", "函數", "斜率", "面積", "中點", "分點", "距離", "坐標", "直線",
@@ -51,42 +68,34 @@ def is_math_related(t, has_file=False):
     if has_file: return True
     if not t: return False
     tl = t.lower()
-    # 明確叫阿Sir 必答
     if any(k in tl for k in ["lc sir", "lc", "阿sir", "sir", "老師"]): return True
-    # 有數學符號/數字+英文字
     if re.search(r"[a-zA-Z]\s*[=<>≤≥]", t): return True
     if re.search(r"[0-9]\s*[xXyY]\s*[=+\-]", t): return True
     if any(k.lower() in tl for k in MATH_KEYWORDS): return True
-    # 超過2個數字 + 問句，通常係數學
     if len(re.findall(r"\d", t)) >= 2 and any(q in t for q in ["?", "？", "點", "點解", "幾多", "點計"]): return True
     return False
 
 def is_pure_chatter(t):
-    """純吹水，絕對唔答"""
     if not t: return True
     t = t.strip()
     chatter = ["食咩", "去邊", "哈哈", "hehe", "haha", "早晨", "午安", "晚安", "多謝", "唔該", "收到", "ok", "okay", "bye", "hello", "hi"]
-    if len(t) <= 8 and any(c in t.lower() for c in chatter):
+    if len(t) <= 10 and any(c in t.lower() for c in chatter):
         return True
     if re.fullmatch(r"[哈呵嗯哦呀😂🤣👍🙏🥲 ]+", t):
         return True
     return False
 
-# ============ FIXED: Follow-up 寬鬆版 ============
 def is_followup_text(t):
     t = (t or "").strip()
     if not t: return False
-    if len(t) > 150: return False  # 放寬到150
+    if len(t) > 150: return False
     keys = [
         "正確寫法","應該係點樣","應該點樣","點寫","解釋","點解","再講","睇唔明","唔明","ya","Ya","must state","注意位","留低下位","點解啱","點解錯",
-        "Q", "q", "點樣", "點樣計", "點計", "仲有", "如果", "咁", "咁點", "跟住", "之後", "係咪", "係唔係", "即係", "咁即係", "可唔可以", "講多次", "再解釋"
+        "點樣", "點樣計", "點計", "仲有", "如果", "咁", "咁點", "跟住", "之後", "係咪", "係唔係", "即係", "咁即係", "可唔可以", "講多次", "再解釋",
+        "Q", "q"
     ]
-    # 1. 有關鍵字
     if any(k in t for k in keys): return True
-    # 2. 短句 + 問號，極大機會係追問
-    if len(t) <= 30 and ("?" in t or "？" in t or "點" in t):
-        return True
-    # 3. 得幾個字，例如 "Q16呢?" "咁Q7呢"
+    if len(t) <= 30 and ("?" in t or "？" in t or "點" in t): return True
     if len(t) <= 20: return True
     return False
 
@@ -328,15 +337,13 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
                     if not any(k in text.lower() for k in ["lc","阿sir","老師"]):
                         stop_typing.set(); return
 
-                # ===== V10.24 NEW: 群組吹水過濾 =====
+                # V10.25: 吹水過濾
                 b64_tmp_check = "imageMessage" in msg or "documentMessage" in msg
                 if not b64_tmp_check:
                     if is_pure_chatter(pure_text):
                         print(f"[FILTER] 純吹水 Ignore: {pure_text[:20]}")
                         stop_typing.set(); return
-                    # 如果無數學相關 + 無叫阿Sir，就唔答
                     if not is_math_related(pure_text, has_file=False):
-                        # 但係追問就例外
                         if not is_followup_text(pure_text):
                             print(f"[FILTER] 非數學 Ignore: {pure_text[:30]}")
                             stop_typing.set(); return
@@ -349,30 +356,32 @@ def do_work(jid, text, push_name, participant, from_me, msg, data, msg_id):
             elif is_pdf:
                 b64,mime=get_file_base64(data, True); text=(text or "呢份PDF逐題改晒").strip(); mime="application/pdf"
             
-            # ===== V10.24 FIXED: 追問用返舊圖 (放寬) =====
+            # V10.25: 追問用返舊圖 - 持久化版本
             if not b64 and is_followup_text(text):
                 hist = GROUP_HISTORY_IMAGE.get(my_jid)
-                if hist and hist.get("b64") and (time.time() - hist.get("time",0) < 600):  # 10分鐘內
-                    print(f"[FOLLOWUP FIX V10.24] jid={my_jid[-10:]} 用返上一張圖 text={text[:30]}")
-                    b64 = hist["b64"]
-                    mime = hist.get("mime","image/jpeg")
-                    text = f"學生追問上一題：{text}。請根據上一張功課圖解釋，MUST只講圖入面有嘅題目，唔准作新題目如 y=√(x+3)=5，如果係三角學就講三角學，如果係 Q16 就講 Q16。"
-                else:
-                    print(f"[FOLLOWUP FIX] 無舊圖或過期")
-                    # 唔直接彈走，試下叫 Gemini 用文字答，如果真係唔得先叫重發
-                    if len(text) < 10:
-                        stop_typing.set()
-                        send_text(my_jid, "可唔可以將頭先嗰題影多次俾我睇下呀？我幫你逐行睇正確寫法呀～")
-                        return
+                if hist and hist.get("b64"):
+                    age = time.time() - hist.get("time",0)
+                    if age < 3600:  # 1小時內都有效
+                        print(f"[FOLLOWUP FIX V10.25] 用返舊圖 age={int(age)}s text={text[:30]}")
+                        b64 = hist["b64"]
+                        mime = hist.get("mime","image/jpeg")
+                        text = f"學生追問上一題：{text}。請根據上一張功課圖解釋，MUST只講圖入面有嘅題目，唔准作新題目。"
+                    else:
+                        print(f"[FOLLOWUP FIX] 舊圖過期 {int(age)}s")
+                        GROUP_HISTORY_IMAGE.pop(my_jid, None)
+                        save_history()
+                if not b64:
+                    print(f"[FOLLOWUP FIX] 無舊圖，叫重發")
+                    stop_typing.set()
+                    send_text(my_jid, "可唔可以將頭先嗰題影多次俾我睇下呀？我幫你逐行睇正確寫法呀～")
+                    return
 
             if not text and not b64: stop_typing.set(); return
             if (is_image or is_pdf) and not b64: stop_typing.set(); send_text(my_jid, "份file仲 load 緊，麻煩再send多次 🙏"); return
 
             if b64:
                 GROUP_HISTORY_IMAGE[my_jid] = {"b64": b64, "mime": mime, "time": time.time()}
-                if len(GROUP_HISTORY_IMAGE) > 50:
-                    oldest = sorted(GROUP_HISTORY_IMAGE.items(), key=lambda x: x[1].get("time",0))[0][0]
-                    del GROUP_HISTORY_IMAGE[oldest]
+                save_history()
 
             answer,status=call_gemini(text, b64, mime); stop_typing.set()
             if not answer or len(answer.strip())<50: answer="收到喇，LC Sir 幫你睇緊先 YA～"
